@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-ink-900 text-zinc-100 antialiased;
+  font-family: var(--font-sans);
+  /* textura técnica sutil: grade tipo planta hidráulica */
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(250, 186, 13, 0.05) 1px, transparent 0);
+  background-size: 28px 28px;
+}
+
+/* tira spinners feios dos inputs number, teclado numérico no mobile via inputMode */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.glass {
+  background: rgba(33, 33, 31, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(250, 186, 13, 0.14);
+}
+
+.field-label {
+  @apply text-[11px] font-medium uppercase tracking-wider text-zinc-400;
+}
