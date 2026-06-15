@@ -26,33 +26,36 @@ import {
 
 const MODULO = "pvc-cpvc-pressao";
 
-// O "Meus Projetos" aqui salva o PROJETO INTEIRO (lista de trechos + residual inicial).
+// Um PROJETO = várias INSERÇÕES (trechos) acumuladas, como nas macros do Excel.
+// O "rascunho" é a inserção que está sendo montada; só entra no projeto ao clicar "Inserir".
 interface Form {
   material: Material;
   residualInicial: number; // mca disponível na entrada do projeto
-  trechos: TrechoSalvo[];
+  trechos: TrechoSalvo[]; // inserções já confirmadas
 }
 
-function novoTrechoSalvo(material: Material, n: number): TrechoSalvo {
-  return { ...trechoPadrao(material), nome: `Trecho ${n}` };
-}
+const PADRAO: Form = { material: "PVC", residualInicial: 10, trechos: [] };
 
-function padrao(material: Material): Form {
+function freshDraft(material: Material, count: number, base?: TrechoSalvo): TrechoSalvo {
+  const d = trechoPadrao(material);
   return {
-    material,
-    residualInicial: 10,
-    trechos: [novoTrechoSalvo(material, 1)],
+    ...d,
+    nome: `Trecho ${count + 1}`,
+    // mantém escolhas comuns entre inserções para agilizar (engenheiro repete bitola/peça)
+    diametro: base?.diametro ?? d.diametro,
+    temperaturaAgua: base?.temperaturaAgua ?? d.temperaturaAgua,
+    pecaMinima: base?.pecaMinima ?? d.pecaMinima,
   };
 }
-
-const PADRAO: Form = padrao("PVC");
 
 export default function PvcCpvcPressao() {
   const [f, setF] = useState<Form>(PADRAO);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
 
-  // índice do trecho atualmente em edição (o "trecho atual" dos outputs herói)
-  const [atual, setAtual] = useState(0);
+  // rascunho (inserção atual) e índice em edição (null = nova inserção)
+  const [draft, setDraft] = useState<TrechoSalvo>(() => freshDraft("PVC", 0));
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   // --- estado de salvamento ("Meus Projetos") ---
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -67,17 +70,13 @@ export default function PvcCpvcPressao() {
     refresh();
   }, []);
 
-  // marca "não salvo" sempre que os inputs divergem do último snapshot salvo
   useEffect(() => {
     const atualStr = JSON.stringify(f);
-    if (projetoId && atualStr === snapshot.current) {
-      setEstado("salvo");
-    } else if (projetoId || atualStr !== JSON.stringify(PADRAO)) {
-      setEstado("nao-salvo");
-    }
+    if (projetoId && atualStr === snapshot.current) setEstado("salvo");
+    else if (projetoId || atualStr !== JSON.stringify(PADRAO)) setEstado("nao-salvo");
   }, [f, projetoId]);
 
-  function salvar() {
+  function salvarProjetoNuvem() {
     setEstado("salvando");
     const p = salvarProjeto<Form>({
       id: projetoId ?? undefined,
@@ -96,7 +95,8 @@ export default function PvcCpvcPressao() {
   function carregar(p: Projeto) {
     const inputs = p.inputs as Form;
     setF(inputs);
-    setAtual(0);
+    setDraft(freshDraft(inputs.material, inputs.trechos.length));
+    setEditIndex(null);
     setProjetoId(p.id);
     setNome(p.nome);
     snapshot.current = JSON.stringify(inputs);
@@ -104,9 +104,10 @@ export default function PvcCpvcPressao() {
     setEstado("salvo");
   }
 
-  function novo() {
+  function novoProjeto() {
     setF(PADRAO);
-    setAtual(0);
+    setDraft(freshDraft("PVC", 0));
+    setEditIndex(null);
     setProjetoId(null);
     setNome("");
     snapshot.current = "";
@@ -114,74 +115,83 @@ export default function PvcCpvcPressao() {
     setEstado("nao-salvo");
   }
 
-  // troca de material: refaz os diâmetros default dos trechos (dropdown muda de tabela)
   function trocarMaterial(material: Material) {
     setF((p) => ({
       ...p,
       material,
-      trechos: p.trechos.map((t) => ({
-        ...t,
+      trechos: p.trechos.map((tr) => ({
+        ...tr,
         material,
-        diametro: diametrosDe(material)[1].comercial, // 2ª bitola como default seguro
-        conexoes: {}, // ids de conexão são compatíveis, mas zera p/ evitar bitola inexistente
+        diametro: diametrosDe(material)[1].comercial,
+        conexoes: {},
       })),
     }));
+    setDraft((d) => ({ ...d, material, diametro: diametrosDe(material)[1].comercial, conexoes: {} }));
   }
 
-  // helpers para mexer no trecho atual
-  const t = f.trechos[atual];
-  function setTrecho(patch: Partial<TrechoSalvo>) {
-    setF((p) => ({
-      ...p,
-      trechos: p.trechos.map((x, i) => (i === atual ? { ...x, ...patch } : x)),
-    }));
-  }
-  function setPeca(nome: string, qtd: number) {
-    setTrecho({ pecas: { ...t.pecas, [nome]: qtd } });
-  }
-  function setConexao(id: string, qtd: number) {
-    setTrecho({ conexoes: { ...t.conexoes, [id]: qtd } });
-  }
+  // helpers do rascunho
+  const setDraftPatch = (patch: Partial<TrechoSalvo>) => setDraft((d) => ({ ...d, ...patch }));
+  const setPeca = (n: string, qtd: number) => setDraft((d) => ({ ...d, pecas: { ...d.pecas, [n]: qtd } }));
+  const setConexao = (id: string, qtd: number) =>
+    setDraft((d) => ({ ...d, conexoes: { ...d.conexoes, [id]: qtd } }));
 
-  function addTrecho() {
-    setF((p) => {
-      const novos = [...p.trechos, novoTrechoSalvo(p.material, p.trechos.length + 1)];
-      return { ...p, trechos: novos };
-    });
-    setAtual(f.trechos.length);
-  }
-  function excluirTrecho(i: number) {
-    setF((p) => ({ ...p, trechos: p.trechos.filter((_, idx) => idx !== i) }));
-    setAtual((a) => Math.max(0, a >= i ? a - 1 : a));
-  }
-
-  // --- cálculo AO VIVO ---
-  // projeto inteiro encadeado (residual de um vira "anterior" do próximo)
+  // --- cálculo do projeto (encadeado) ---
   const projeto = useMemo(
     () => calcularProjeto(f.trechos, f.residualInicial),
     [f.trechos, f.residualInicial],
   );
-  // residual que entra no trecho atual = residual do anterior (ou inicial)
-  const residualAnterior = atual === 0 ? f.residualInicial : projeto[atual - 1].resultado.pressaoResidual;
-  const r = useMemo(
-    () => (t ? calcularTrecho(t, residualAnterior) : null),
-    [t, residualAnterior],
-  );
+
+  // pressão de entrada do rascunho: fim da cadeia (nova) ou anterior ao índice editado
+  const entradaDraft =
+    editIndex === null
+      ? projeto.length
+        ? projeto[projeto.length - 1].resultado.pressaoResidual
+        : f.residualInicial
+      : editIndex === 0
+        ? f.residualInicial
+        : projeto[editIndex - 1].resultado.pressaoResidual;
+
+  const r = useMemo(() => calcularTrecho(draft, entradaDraft), [draft, entradaDraft]);
+
+  // resumo do projeto (a casa toda)
+  const reprovados = projeto.filter((p) => !p.resultado.residualOk).length;
+  const criticaResidual = projeto.length
+    ? Math.min(...projeto.map((p) => p.resultado.pressaoResidual))
+    : null;
+
+  // ações de inserção (igual às macros: vai inserindo, NÃO fecha o projeto)
+  function inserir() {
+    setF((p) => ({ ...p, trechos: [...p.trechos, { ...draft }] }));
+    setDraft((d) => freshDraft(f.material, f.trechos.length + 1, d));
+    setEditIndex(null);
+  }
+  function salvarEdicao() {
+    if (editIndex === null) return;
+    setF((p) => ({
+      ...p,
+      trechos: p.trechos.map((x, i) => (i === editIndex ? { ...draft } : x)),
+    }));
+    setDraft(freshDraft(f.material, f.trechos.length));
+    setEditIndex(null);
+  }
+  function editar(i: number) {
+    setDraft({ ...f.trechos[i] });
+    setEditIndex(i);
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function cancelarEdicao() {
+    setDraft(freshDraft(f.material, f.trechos.length));
+    setEditIndex(null);
+  }
+  function excluirInsercao(i: number) {
+    setF((p) => ({ ...p, trechos: p.trechos.filter((_, idx) => idx !== i) }));
+    if (editIndex === i) cancelarEdicao();
+  }
 
   const opcoesDiam = diametrosDe(f.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
   const conexoes = conexoesDe(f.material);
   const isAQ = f.material === "CPVC";
-
-  if (!t || !r) {
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-zinc-400">Nenhum trecho. Adicione um trecho para começar.</p>
-        <button onClick={addTrecho} className="rounded-xl bg-amber px-5 py-2.5 text-sm font-bold text-ink-900">
-          Adicionar trecho
-        </button>
-      </div>
-    );
-  }
+  const editando = editIndex !== null;
 
   return (
     <div className="space-y-5">
@@ -195,7 +205,8 @@ export default function PvcCpvcPressao() {
             PVC/CPVC, Bombas & Pressão
           </h1>
           <p className="text-sm text-zinc-400">
-            Dimensionamento trecho a trecho (Método dos Pesos, NBR 5626) com pressão residual acumulada.
+            Dimensione a casa toda inserindo um trecho de cada vez. A pressão se acumula de uma
+            inserção pra próxima — como nas macros, mas sem planilha.
           </p>
         </div>
         <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
@@ -218,17 +229,42 @@ export default function PvcCpvcPressao() {
         ))}
       </div>
 
-      {/* RESULT HERO — trecho atual */}
+      {/* RESUMO DO PROJETO (a casa toda) */}
+      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <ResumoItem titulo="Inserções" valor={`${f.trechos.length}`} />
+          <ResumoItem
+            titulo="Pressão crítica"
+            valor={criticaResidual === null ? "—" : `${criticaResidual.toFixed(1)}`}
+            sub="mca"
+            alerta={criticaResidual !== null && criticaResidual < 1}
+          />
+          <ResumoItem
+            titulo="Pontos reprovados"
+            valor={`${reprovados}`}
+            alerta={reprovados > 0}
+          />
+        </div>
+        <div className="mt-4">
+          <NumberField
+            label="Pressão de entrada do projeto"
+            value={f.residualInicial}
+            onChange={(v) => set("residualInicial", v)}
+            unit="mca"
+            hint="Pressão disponível na chegada (ex.: coluna do reservatório). Entra no 1º trecho."
+          />
+        </div>
+      </div>
+
+      {/* RESULT HERO — inserção atual (prévia, antes de inserir) */}
       <div className="glass rounded-3xl p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
-            {t.nome} · {f.material} {t.diametro} mm
+            {editando ? `Editando: ${draft.nome}` : "Inserção atual (prévia)"} · {f.material} {draft.diametro} mm
           </span>
           <span
             className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              r.residualOk
-                ? "bg-emerald-500/15 text-emerald-400"
-                : "bg-red-500/15 text-red-400"
+              r.residualOk ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
             }`}
           >
             {r.residualOk ? "Pressão OK" : "Pressão insuficiente!"}
@@ -237,7 +273,6 @@ export default function PvcCpvcPressao() {
 
         <PipeFlow velocidade={r.velocidade} label="água no trecho" />
 
-        {/* número-herói: pressão residual */}
         <div className="mt-4 rounded-2xl bg-ink-900/50 p-4 text-center">
           <div className="text-[11px] uppercase tracking-wider text-zinc-500">
             Pressão residual no ponto
@@ -250,7 +285,7 @@ export default function PvcCpvcPressao() {
             {r.pressaoResidual.toFixed(2)} <span className="text-xl">mca</span>
           </div>
           <div className="mt-1 text-[11px] text-zinc-500">
-            mínimo p/ {PRESSAO_MINIMA.find((p) => p.id === t.pecaMinima)?.nome}: {r.pressaoMinima.toFixed(2)} mca
+            mínimo p/ {PRESSAO_MINIMA.find((p) => p.id === draft.pecaMinima)?.nome}: {r.pressaoMinima.toFixed(2)} mca
             {" · "}
             {(r.pressaoResidual * 9.80665).toFixed(0)} kPa
           </div>
@@ -265,10 +300,9 @@ export default function PvcCpvcPressao() {
             alerta={!r.velocidadeOk}
           />
           <Hero titulo="Perda de carga" valor={`${r.perdaCargaTotal.toFixed(3)} mca`} sub={`${r.compTotal.toFixed(1)} m equiv.`} />
-          <Hero titulo="Pressão disponível" valor={`${r.pressaoDisponivel.toFixed(2)} mca`} sub={`entra ${residualAnterior.toFixed(2)} mca`} />
+          <Hero titulo="Pressão disponível" valor={`${r.pressaoDisponivel.toFixed(2)} mca`} sub={`entra ${entradaDraft.toFixed(2)} mca`} />
         </div>
 
-        {/* extras CPVC (Darcy-Weisbach) */}
         {isAQ && (
           <div className="mt-3 grid grid-cols-3 gap-2">
             <Mini l="Reynolds" v={r.reynolds > 0 ? r.reynolds.toFixed(0) : "—"} />
@@ -276,122 +310,161 @@ export default function PvcCpvcPressao() {
             <Mini l="Fator f" v={r.fatorAtrito > 0 ? r.fatorAtrito.toFixed(4) : "—"} />
           </div>
         )}
-      </div>
 
-      {/* SELETOR DE TRECHO + lista encadeada */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-            Trechos do projeto
-          </h3>
-          <button
-            onClick={addTrecho}
-            className="rounded-lg border border-amber/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-amber"
-          >
-            + Trecho
-          </button>
-        </div>
-        <ul className="space-y-2">
-          {projeto.map((p, i) => {
-            const ok = p.resultado.residualOk;
-            return (
-              <li
-                key={i}
-                className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${
-                  i === atual ? "border-amber/50 bg-amber/5" : "border-ink-600"
-                }`}
+        {/* AÇÃO PRIMÁRIA: inserir (igual macro). NÃO fecha o projeto. */}
+        <div className="mt-4 flex gap-2">
+          {editando ? (
+            <>
+              <button
+                onClick={salvarEdicao}
+                className="flex-1 rounded-xl bg-amber py-3.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-[0.98]"
               >
-                <button onClick={() => setAtual(i)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-medium text-zinc-100">
-                    {p.trecho.nome}{" "}
-                    <span className="text-zinc-500">
-                      · {f.material} {p.trecho.diametro}mm
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-zinc-500">
-                    residual{" "}
-                    <span className={ok ? "font-semibold text-emerald-400" : "font-semibold text-red-400"}>
-                      {p.resultado.pressaoResidual.toFixed(2)} mca
-                    </span>{" "}
-                    · V {p.resultado.velocidade.toFixed(2)} m/s
-                  </div>
-                </button>
-                {f.trechos.length > 1 && (
-                  <button
-                    onClick={() => excluirTrecho(i)}
-                    className="ml-3 text-xs text-zinc-500 hover:text-red-400"
-                  >
-                    excluir
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          A pressão residual de cada trecho vira a pressão de entrada do próximo automaticamente.
-          Verde = atende o mínimo da peça; vermelho = insuficiente ou negativa.
+                Salvar alterações
+              </button>
+              <button
+                onClick={cancelarEdicao}
+                className="rounded-xl border border-ink-600 px-4 py-3.5 text-sm font-semibold text-zinc-400"
+              >
+                Cancelar
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={inserir}
+              className="flex-1 rounded-xl bg-amber py-3.5 font-display text-base font-bold uppercase tracking-wider text-ink-900 active:scale-[0.98]"
+            >
+              + Inserir no projeto
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-center text-[11px] text-zinc-500">
+          {editando
+            ? "Você está editando uma inserção já no projeto."
+            : "Insira quantos trechos precisar (10, 15, 20+). Isso não fecha o projeto."}
         </p>
       </div>
 
-      {/* FORM do trecho atual */}
-      <div className="space-y-4">
+      {/* LISTA DE INSERÇÕES DO PROJETO */}
+      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+          Inserções do projeto ({f.trechos.length})
+        </h3>
+        {projeto.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            Nenhuma inserção ainda. Monte o trecho acima e toque em{" "}
+            <span className="font-semibold text-amber">+ Inserir no projeto</span>. Vá repetindo pra
+            dimensionar a casa inteira.
+          </p>
+        ) : (
+          <ol className="space-y-2">
+            {projeto.map((p, i) => {
+              const ok = p.resultado.residualOk;
+              return (
+                <li
+                  key={i}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
+                    i === editIndex ? "border-amber/60 bg-amber/5" : "border-ink-600"
+                  }`}
+                >
+                  <span className="font-display text-xs font-bold text-zinc-500">{i + 1}</span>
+                  <button onClick={() => editar(i)} className="min-w-0 flex-1 text-left">
+                    <div className="truncate text-sm font-medium text-zinc-100">
+                      {p.trecho.nome}
+                      <span className="text-zinc-500">
+                        {" "}· {f.material} {p.trecho.diametro}mm
+                      </span>
+                      {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
+                    </div>
+                    <div className="text-[11px] text-zinc-500">
+                      residual{" "}
+                      <span className={ok ? "font-semibold text-emerald-400" : "font-semibold text-red-400"}>
+                        {p.resultado.pressaoResidual.toFixed(2)} mca
+                      </span>{" "}
+                      · V {p.resultado.velocidade.toFixed(2)} m/s
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => editar(i)}
+                    className="text-xs text-zinc-500 hover:text-amber"
+                  >
+                    editar
+                  </button>
+                  <button
+                    onClick={() => excluirInsercao(i)}
+                    className="text-xs text-zinc-500 hover:text-red-400"
+                  >
+                    excluir
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+          A pressão residual de cada inserção vira a entrada da próxima automaticamente. Verde =
+          atende o mínimo da peça; vermelho = insuficiente ou negativa. Toque numa inserção para
+          editar.
+        </p>
+      </div>
+
+      {/* FORM do rascunho (inserção atual) */}
+      <div ref={formRef} className="space-y-4 scroll-mt-24">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+            {editando ? `Editando inserção ${editIndex! + 1}` : "Montar nova inserção"}
+          </h3>
+          {editando && (
+            <button onClick={cancelarEdicao} className="text-xs text-amber">
+              + nova inserção
+            </button>
+          )}
+        </div>
+
         <Accordion title="Tubo & geometria" defaultOpen>
           <div className="grid grid-cols-2 gap-4">
             <SelectField
               label="Diâmetro comercial"
-              value={t.diametro}
-              onChange={(v) => setTrecho({ diametro: Number(v) })}
+              value={draft.diametro}
+              onChange={(v) => setDraftPatch({ diametro: Number(v) })}
               options={opcoesDiam}
             />
             <NumberField
               label="Comprimento real"
-              value={t.comprimentoReal}
-              onChange={(v) => setTrecho({ comprimentoReal: v })}
+              value={draft.comprimentoReal}
+              onChange={(v) => setDraftPatch({ comprimentoReal: v })}
               unit="m"
             />
             <NumberField
               label="Elevação que SOBE"
-              value={t.sobe}
-              onChange={(v) => setTrecho({ sobe: v })}
+              value={draft.sobe}
+              onChange={(v) => setDraftPatch({ sobe: v })}
               unit="m"
             />
             <NumberField
               label="Elevação que DESCE"
-              value={t.desce}
-              onChange={(v) => setTrecho({ desce: v })}
+              value={draft.desce}
+              onChange={(v) => setDraftPatch({ desce: v })}
               unit="m"
               hint={`desnível (sobe − desce) = ${r.desnivel.toFixed(2)} m`}
             />
             <NumberField
               label="Incremento pressurizador"
-              value={t.incrementoPressurizador}
-              onChange={(v) => setTrecho({ incrementoPressurizador: v })}
+              value={draft.incrementoPressurizador}
+              onChange={(v) => setDraftPatch({ incrementoPressurizador: v })}
               unit="mca"
             />
-            {atual === 0 && (
-              <NumberField
-                label="Pressão de entrada"
-                value={f.residualInicial}
-                onChange={(v) => set("residualInicial", v)}
-                unit="mca"
-                hint="Pressão disponível no início do projeto"
-              />
-            )}
           </div>
         </Accordion>
 
         {isAQ && (
           <Accordion title="Temperatura da água (CPVC)" defaultOpen>
-            <div className="grid grid-cols-1 gap-4">
-              <NumberField
-                label="Temperatura da água"
-                value={t.temperaturaAgua}
-                onChange={(v) => setTrecho({ temperaturaAgua: v })}
-                unit="°C"
-                hint="Define a viscosidade → Reynolds → fator de atrito (Darcy-Weisbach)"
-              />
-            </div>
+            <NumberField
+              label="Temperatura da água"
+              value={draft.temperaturaAgua}
+              onChange={(v) => setDraftPatch({ temperaturaAgua: v })}
+              unit="°C"
+              hint="Define a viscosidade → Reynolds → fator de atrito (Darcy-Weisbach)"
+            />
           </Accordion>
         )}
 
@@ -404,7 +477,7 @@ export default function PvcCpvcPressao() {
               <Stepper
                 key={p.nome}
                 label={`${p.nome} (peso ${p.peso})`}
-                value={t.pecas[p.nome] ?? 0}
+                value={draft.pecas[p.nome] ?? 0}
                 onChange={(v) => setPeca(p.nome, v)}
                 min={0}
                 max={40}
@@ -425,8 +498,8 @@ export default function PvcCpvcPressao() {
             {conexoes.map((c) => (
               <Stepper
                 key={c.id}
-                label={`${c.nome} (${(c.valores[t.diametro] ?? 0).toFixed(2)} m)`}
-                value={t.conexoes[c.id] ?? 0}
+                label={`${c.nome} (${(c.valores[draft.diametro] ?? 0).toFixed(2)} m)`}
+                value={draft.conexoes[c.id] ?? 0}
                 onChange={(v) => setConexao(c.id, v)}
                 min={0}
                 max={40}
@@ -442,33 +515,33 @@ export default function PvcCpvcPressao() {
           <div className="grid grid-cols-2 gap-4">
             <Stepper
               label="Registro de pressão (qtd)"
-              value={t.qtdRegistroPressao}
-              onChange={(v) => setTrecho({ qtdRegistroPressao: v })}
+              value={draft.qtdRegistroPressao}
+              onChange={(v) => setDraftPatch({ qtdRegistroPressao: v })}
               min={0}
               max={10}
             />
             {isAQ && (
               <Stepper
                 label="Válvula misturadora (qtd)"
-                value={t.qtdValvulaMisturadora}
-                onChange={(v) => setTrecho({ qtdValvulaMisturadora: v })}
+                value={draft.qtdValvulaMisturadora}
+                onChange={(v) => setDraftPatch({ qtdValvulaMisturadora: v })}
                 min={0}
                 max={10}
               />
             )}
             <SelectField
               label="Peça crítica (mínimo)"
-              value={t.pecaMinima}
-              onChange={(v) => setTrecho({ pecaMinima: String(v) })}
+              value={draft.pecaMinima}
+              onChange={(v) => setDraftPatch({ pecaMinima: String(v) })}
               options={PRESSAO_MINIMA.map((p) => ({ value: p.id, label: `${p.nome} (${p.mca} mca)` }))}
             />
           </div>
         </Accordion>
 
-        <Accordion title="Nome do trecho">
+        <Accordion title="Nome / ambiente do trecho" defaultOpen>
           <input
-            value={t.nome}
-            onChange={(e) => setTrecho({ nome: e.target.value })}
+            value={draft.nome}
+            onChange={(e) => setDraftPatch({ nome: e.target.value })}
             placeholder="Ex.: Coluna AF → banheiro suíte"
             className="w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-3 text-base font-semibold text-zinc-100 outline-none focus:border-amber/60"
           />
@@ -503,14 +576,21 @@ export default function PvcCpvcPressao() {
         </Accordion>
       </div>
 
-      {/* MEUS PROJETOS (salva o projeto inteiro = lista de trechos) */}
+      {/* MEUS PROJETOS (persistência do projeto inteiro) */}
       <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Meus projetos
-        </h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+            Meus projetos
+          </h3>
+          {projetoId && (
+            <button onClick={novoProjeto} className="text-xs text-amber">
+              + novo projeto
+            </button>
+          )}
+        </div>
         {projetos.length === 0 ? (
           <p className="text-sm text-zinc-500">
-            Nenhum projeto salvo ainda. Dê um nome e toque em “Salvar projeto”.
+            Nenhum projeto salvo ainda. Monte as inserções e toque em “Salvar projeto”.
           </p>
         ) : (
           <ul className="space-y-2">
@@ -526,14 +606,14 @@ export default function PvcCpvcPressao() {
                   <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
                     <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
                     <div className="text-[11px] text-zinc-500">
-                      {inp.material} · {inp.trechos?.length ?? 0} trecho(s) · salvo{" "}
+                      {inp.material} · {inp.trechos?.length ?? 0} inserção(ões) · salvo{" "}
                       {tempoRelativo(p.atualizadoEm)}
                     </div>
                   </button>
                   <button
                     onClick={() => {
                       excluirProjeto(p.id);
-                      if (p.id === projetoId) novo();
+                      if (p.id === projetoId) novoProjeto();
                       refresh();
                     }}
                     className="ml-3 text-xs text-zinc-500 hover:text-red-400"
@@ -547,30 +627,78 @@ export default function PvcCpvcPressao() {
         )}
       </div>
 
-      {/* BARRA STICKY de salvar */}
+      {/* BARRA STICKY: ação primária = INSERIR; salvar projeto é secundário */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-900/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 py-3">
-          <input
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            placeholder="Nome do projeto (ex.: Casa Jerivá - prumada AF)"
-            className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60"
-          />
-          {projetoId && (
-            <button
-              onClick={novo}
-              className="rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400"
-            >
-              Novo
-            </button>
+        <div className="mx-auto max-w-3xl px-4 py-3">
+          {editando ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={salvarEdicao}
+                className="flex-1 rounded-xl bg-amber py-3 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-95"
+              >
+                Salvar alterações no trecho {editIndex! + 1}
+              </button>
+              <button
+                onClick={cancelarEdicao}
+                className="rounded-xl border border-ink-600 px-4 py-3 text-sm text-zinc-400"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={inserir}
+                className="flex-1 rounded-xl bg-amber py-3 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-95"
+              >
+                + Inserir no projeto ({f.trechos.length})
+              </button>
+              <input
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                placeholder="Nome do projeto"
+                className="hidden min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-3 text-sm text-zinc-100 outline-none focus:border-amber/60 sm:block"
+              />
+              <button
+                onClick={salvarProjetoNuvem}
+                className="rounded-xl border border-amber/40 px-4 py-3 text-sm font-bold text-amber active:scale-95"
+              >
+                {projetoId ? "Atualizar" : "Salvar projeto"}
+              </button>
+            </div>
           )}
-          <button
-            onClick={salvar}
-            className="rounded-xl bg-amber px-5 py-2.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-95"
-          >
-            {projetoId ? "Atualizar" : "Salvar projeto"}
-          </button>
+          {/* campo de nome no mobile */}
+          {!editando && (
+            <input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Nome do projeto (ex.: Casa Jerivá - prumada AF)"
+              className="mt-2 w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60 sm:hidden"
+            />
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ResumoItem({
+  titulo,
+  valor,
+  sub,
+  alerta,
+}: {
+  titulo: string;
+  valor: string;
+  sub?: string;
+  alerta?: boolean;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{titulo}</div>
+      <div className={`mt-0.5 font-display text-2xl font-bold ${alerta ? "text-red-400" : "text-zinc-100"}`}>
+        {valor}
+        {sub && <span className="ml-1 text-sm text-zinc-500">{sub}</span>}
       </div>
     </div>
   );
