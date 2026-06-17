@@ -175,29 +175,6 @@ export default function CaixaBoilerSolar() {
         </div>
       )}
 
-      {/* RESULT HERO */}
-      <div className="glass rounded-3xl p-5">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Hero
-            titulo="Boiler · água quente"
-            valor={`${fmt(r.volBoilerQuente, 0)} L`}
-            sub={`exato: ${fmt(r.volBoilerQuente, 1)} L`}
-          />
-          <Hero
-            titulo="Comprar coletores"
-            valor={`${r.nColetoresCorrigido}`}
-            sub={`exato: ${fmt(r.nCorrigidoExato, 2)} · ${fmt(f.producaoColetor, 1)} kWh/mês cada`}
-          />
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <Det l="Consumo total / dia" v={`${fmt(r.consumoTotal, 0)} L`} />
-          <Det l="Volume água fria" v={`${fmt(r.volFria, 0)} L`} />
-          <Det l="% água quente" v={`${fmt(r.pctAQ, 1)} %`} />
-          <Det l="% água fria" v={`${fmt(r.pctAF, 1)} %`} />
-        </div>
-      </div>
-
       {/* USUÁRIOS + TEMPERATURAS */}
       <Accordion title="Usuários & temperaturas" defaultOpen>
         <div className="grid grid-cols-2 gap-4">
@@ -355,6 +332,29 @@ export default function CaixaBoilerSolar() {
           />
         </div>
       </Accordion>
+
+      {/* RESULT HERO */}
+      <div className="glass rounded-3xl p-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Hero
+            titulo="Boiler · água quente"
+            valor={`${fmt(r.volBoilerQuente, 0)} L`}
+            sub={`exato: ${fmt(r.volBoilerQuente, 1)} L`}
+          />
+          <Hero
+            titulo="Comprar coletores"
+            valor={`${r.nColetoresCorrigido}`}
+            sub={`exato: ${fmt(r.nCorrigidoExato, 2)} · ${fmt(f.producaoColetor, 1)} kWh/mês cada`}
+          />
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Det l="Consumo total / dia" v={`${fmt(r.consumoTotal, 0)} L`} />
+          <Det l="Volume água fria" v={`${fmt(r.volFria, 0)} L`} />
+          <Det l="% água quente" v={`${fmt(r.pctAQ, 1)} %`} />
+          <Det l="% água fria" v={`${fmt(r.pctAF, 1)} %`} />
+        </div>
+      </div>
 
       {/* COMO CHEGAMOS NO Nº DE COLETORES */}
       <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">

@@ -229,184 +229,6 @@ export default function PvcCpvcPressao() {
         ))}
       </div>
 
-      {/* RESUMO DO PROJETO (a casa toda) */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <ResumoItem titulo="Inserções" valor={`${f.trechos.length}`} />
-          <ResumoItem
-            titulo="Pressão crítica"
-            valor={criticaResidual === null ? "—" : `${criticaResidual.toFixed(1)}`}
-            sub="mca"
-            alerta={criticaResidual !== null && criticaResidual < 1}
-          />
-          <ResumoItem
-            titulo="Pontos reprovados"
-            valor={`${reprovados}`}
-            alerta={reprovados > 0}
-          />
-        </div>
-        <div className="mt-4">
-          <NumberField
-            label="Pressão de entrada do projeto"
-            value={f.residualInicial}
-            onChange={(v) => set("residualInicial", v)}
-            unit="mca"
-            hint="Pressão disponível na chegada (ex.: coluna do reservatório). Entra no 1º trecho."
-          />
-        </div>
-      </div>
-
-      {/* RESULT HERO — inserção atual (prévia, antes de inserir) */}
-      <div className="glass rounded-3xl p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
-            {editando ? `Editando: ${draft.nome}` : "Inserção atual (prévia)"} · {f.material} {draft.diametro} mm
-          </span>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              r.residualOk ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-            }`}
-          >
-            {r.residualOk ? "Pressão OK" : "Pressão insuficiente!"}
-          </span>
-        </div>
-
-        <PipeFlow velocidade={r.velocidade} label="água no trecho" />
-
-        <div className="mt-4 rounded-2xl bg-ink-900/50 p-4 text-center">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500">
-            Pressão residual no ponto
-          </div>
-          <div
-            className={`mt-0.5 font-display text-4xl font-bold ${
-              r.residualOk ? "text-amber" : "text-red-400"
-            }`}
-          >
-            {r.pressaoResidual.toFixed(2)} <span className="text-xl">mca</span>
-          </div>
-          <div className="mt-1 text-[11px] text-zinc-500">
-            mínimo p/ {PRESSAO_MINIMA.find((p) => p.id === draft.pecaMinima)?.nome}: {r.pressaoMinima.toFixed(2)} mca
-            {" · "}
-            {(r.pressaoResidual * 9.80665).toFixed(0)} kPa
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <Hero titulo="Vazão" valor={`${r.vazaoLs.toFixed(3)} L/s`} sub={`${r.vazaoLmin.toFixed(1)} L/min`} />
-          <Hero
-            titulo="Velocidade"
-            valor={`${r.velocidade.toFixed(2)} m/s`}
-            sub={r.velocidadeOk ? "dentro do limite" : "acima de 3 m/s!"}
-            alerta={!r.velocidadeOk}
-          />
-          <Hero titulo="Perda de carga" valor={`${r.perdaCargaTotal.toFixed(3)} mca`} sub={`${r.compTotal.toFixed(1)} m equiv.`} />
-          <Hero titulo="Pressão disponível" valor={`${r.pressaoDisponivel.toFixed(2)} mca`} sub={`entra ${entradaDraft.toFixed(2)} mca`} />
-        </div>
-
-        {isAQ && (
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <Mini l="Reynolds" v={r.reynolds > 0 ? r.reynolds.toFixed(0) : "—"} />
-            <Mini l="Regime" v={r.regime} />
-            <Mini l="Fator f" v={r.fatorAtrito > 0 ? r.fatorAtrito.toFixed(4) : "—"} />
-          </div>
-        )}
-
-        {/* AÇÃO PRIMÁRIA: inserir (igual macro). NÃO fecha o projeto. */}
-        <div className="mt-4 flex gap-2">
-          {editando ? (
-            <>
-              <button
-                onClick={salvarEdicao}
-                className="flex-1 rounded-xl bg-amber py-3.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-[0.98]"
-              >
-                Salvar alterações
-              </button>
-              <button
-                onClick={cancelarEdicao}
-                className="rounded-xl border border-ink-600 px-4 py-3.5 text-sm font-semibold text-zinc-400"
-              >
-                Cancelar
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={inserir}
-              className="flex-1 rounded-xl bg-amber py-3.5 font-display text-base font-bold uppercase tracking-wider text-ink-900 active:scale-[0.98]"
-            >
-              + Inserir no projeto
-            </button>
-          )}
-        </div>
-        <p className="mt-2 text-center text-[11px] text-zinc-500">
-          {editando
-            ? "Você está editando uma inserção já no projeto."
-            : "Insira quantos trechos precisar (10, 15, 20+). Isso não fecha o projeto."}
-        </p>
-      </div>
-
-      {/* LISTA DE INSERÇÕES DO PROJETO */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Inserções do projeto ({f.trechos.length})
-        </h3>
-        {projeto.length === 0 ? (
-          <p className="text-sm text-zinc-500">
-            Nenhuma inserção ainda. Monte o trecho acima e toque em{" "}
-            <span className="font-semibold text-amber">+ Inserir no projeto</span>. Vá repetindo pra
-            dimensionar a casa inteira.
-          </p>
-        ) : (
-          <ol className="space-y-2">
-            {projeto.map((p, i) => {
-              const ok = p.resultado.residualOk;
-              return (
-                <li
-                  key={i}
-                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
-                    i === editIndex ? "border-amber/60 bg-amber/5" : "border-ink-600"
-                  }`}
-                >
-                  <span className="font-display text-xs font-bold text-zinc-500">{i + 1}</span>
-                  <button onClick={() => editar(i)} className="min-w-0 flex-1 text-left">
-                    <div className="truncate text-sm font-medium text-zinc-100">
-                      {p.trecho.nome}
-                      <span className="text-zinc-500">
-                        {" "}· {f.material} {p.trecho.diametro}mm
-                      </span>
-                      {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
-                    </div>
-                    <div className="text-[11px] text-zinc-500">
-                      residual{" "}
-                      <span className={ok ? "font-semibold text-emerald-400" : "font-semibold text-red-400"}>
-                        {p.resultado.pressaoResidual.toFixed(2)} mca
-                      </span>{" "}
-                      · V {p.resultado.velocidade.toFixed(2)} m/s
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => editar(i)}
-                    className="text-xs text-zinc-500 hover:text-amber"
-                  >
-                    editar
-                  </button>
-                  <button
-                    onClick={() => excluirInsercao(i)}
-                    className="text-xs text-zinc-500 hover:text-red-400"
-                  >
-                    excluir
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          A pressão residual de cada inserção vira a entrada da próxima automaticamente. Verde =
-          atende o mínimo da peça; vermelho = insuficiente ou negativa. Toque numa inserção para
-          editar.
-        </p>
-      </div>
-
       {/* FORM do rascunho (inserção atual) */}
       <div ref={formRef} className="space-y-4 scroll-mt-24">
         <div className="flex items-center justify-between">
@@ -419,6 +241,16 @@ export default function PvcCpvcPressao() {
             </button>
           )}
         </div>
+
+        <Accordion title="Pressão de entrada do projeto" defaultOpen>
+          <NumberField
+            label="Pressão de entrada do projeto"
+            value={f.residualInicial}
+            onChange={(v) => set("residualInicial", v)}
+            unit="mca"
+            hint="Pressão disponível na chegada (ex.: coluna do reservatório). Entra no 1º trecho."
+          />
+        </Accordion>
 
         <Accordion title="Tubo & geometria" defaultOpen>
           <div className="grid grid-cols-2 gap-4">
@@ -574,6 +406,175 @@ export default function PvcCpvcPressao() {
             fator de atrito por Colebrook-White (bissecção). π = 3,14 (paridade com a planilha do curso).
           </p>
         </Accordion>
+      </div>
+
+      {/* RESULT HERO — inserção atual (prévia, antes de inserir) */}
+      <div className="glass rounded-3xl p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
+            {editando ? `Editando: ${draft.nome}` : "Inserção atual (prévia)"} · {f.material} {draft.diametro} mm
+          </span>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+              r.residualOk ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+            }`}
+          >
+            {r.residualOk ? "Pressão OK" : "Pressão insuficiente!"}
+          </span>
+        </div>
+
+        <PipeFlow velocidade={r.velocidade} label="água no trecho" />
+
+        <div className="mt-4 rounded-2xl bg-ink-900/50 p-4 text-center">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500">
+            Pressão residual no ponto
+          </div>
+          <div
+            className={`mt-0.5 font-display text-4xl font-bold ${
+              r.residualOk ? "text-amber" : "text-red-400"
+            }`}
+          >
+            {r.pressaoResidual.toFixed(2)} <span className="text-xl">mca</span>
+          </div>
+          <div className="mt-1 text-[11px] text-zinc-500">
+            mínimo p/ {PRESSAO_MINIMA.find((p) => p.id === draft.pecaMinima)?.nome}: {r.pressaoMinima.toFixed(2)} mca
+            {" · "}
+            {(r.pressaoResidual * 9.80665).toFixed(0)} kPa
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Hero titulo="Vazão" valor={`${r.vazaoLs.toFixed(3)} L/s`} sub={`${r.vazaoLmin.toFixed(1)} L/min`} />
+          <Hero
+            titulo="Velocidade"
+            valor={`${r.velocidade.toFixed(2)} m/s`}
+            sub={r.velocidadeOk ? "dentro do limite" : "acima de 3 m/s!"}
+            alerta={!r.velocidadeOk}
+          />
+          <Hero titulo="Perda de carga" valor={`${r.perdaCargaTotal.toFixed(3)} mca`} sub={`${r.compTotal.toFixed(1)} m equiv.`} />
+          <Hero titulo="Pressão disponível" valor={`${r.pressaoDisponivel.toFixed(2)} mca`} sub={`entra ${entradaDraft.toFixed(2)} mca`} />
+        </div>
+
+        {isAQ && (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <Mini l="Reynolds" v={r.reynolds > 0 ? r.reynolds.toFixed(0) : "—"} />
+            <Mini l="Regime" v={r.regime} />
+            <Mini l="Fator f" v={r.fatorAtrito > 0 ? r.fatorAtrito.toFixed(4) : "—"} />
+          </div>
+        )}
+
+        {/* AÇÃO PRIMÁRIA: inserir (igual macro). NÃO fecha o projeto. */}
+        <div className="mt-4 flex gap-2">
+          {editando ? (
+            <>
+              <button
+                onClick={salvarEdicao}
+                className="flex-1 rounded-xl bg-amber py-3.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-[0.98]"
+              >
+                Salvar alterações
+              </button>
+              <button
+                onClick={cancelarEdicao}
+                className="rounded-xl border border-ink-600 px-4 py-3.5 text-sm font-semibold text-zinc-400"
+              >
+                Cancelar
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={inserir}
+              className="flex-1 rounded-xl bg-amber py-3.5 font-display text-base font-bold uppercase tracking-wider text-ink-900 active:scale-[0.98]"
+            >
+              + Inserir no projeto
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-center text-[11px] text-zinc-500">
+          {editando
+            ? "Você está editando uma inserção já no projeto."
+            : "Insira quantos trechos precisar (10, 15, 20+). Isso não fecha o projeto."}
+        </p>
+      </div>
+
+      {/* RESUMO DO PROJETO (a casa toda) */}
+      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <ResumoItem titulo="Inserções" valor={`${f.trechos.length}`} />
+          <ResumoItem
+            titulo="Pressão crítica"
+            valor={criticaResidual === null ? "—" : `${criticaResidual.toFixed(1)}`}
+            sub="mca"
+            alerta={criticaResidual !== null && criticaResidual < 1}
+          />
+          <ResumoItem
+            titulo="Pontos reprovados"
+            valor={`${reprovados}`}
+            alerta={reprovados > 0}
+          />
+        </div>
+      </div>
+
+      {/* LISTA DE INSERÇÕES DO PROJETO */}
+      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+          Inserções do projeto ({f.trechos.length})
+        </h3>
+        {projeto.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            Nenhuma inserção ainda. Monte o trecho acima e toque em{" "}
+            <span className="font-semibold text-amber">+ Inserir no projeto</span>. Vá repetindo pra
+            dimensionar a casa inteira.
+          </p>
+        ) : (
+          <ol className="space-y-2">
+            {projeto.map((p, i) => {
+              const ok = p.resultado.residualOk;
+              return (
+                <li
+                  key={i}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
+                    i === editIndex ? "border-amber/60 bg-amber/5" : "border-ink-600"
+                  }`}
+                >
+                  <span className="font-display text-xs font-bold text-zinc-500">{i + 1}</span>
+                  <button onClick={() => editar(i)} className="min-w-0 flex-1 text-left">
+                    <div className="truncate text-sm font-medium text-zinc-100">
+                      {p.trecho.nome}
+                      <span className="text-zinc-500">
+                        {" "}· {f.material} {p.trecho.diametro}mm
+                      </span>
+                      {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
+                    </div>
+                    <div className="text-[11px] text-zinc-500">
+                      residual{" "}
+                      <span className={ok ? "font-semibold text-emerald-400" : "font-semibold text-red-400"}>
+                        {p.resultado.pressaoResidual.toFixed(2)} mca
+                      </span>{" "}
+                      · V {p.resultado.velocidade.toFixed(2)} m/s
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => editar(i)}
+                    className="text-xs text-zinc-500 hover:text-amber"
+                  >
+                    editar
+                  </button>
+                  <button
+                    onClick={() => excluirInsercao(i)}
+                    className="text-xs text-zinc-500 hover:text-red-400"
+                  >
+                    excluir
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+          A pressão residual de cada inserção vira a entrada da próxima automaticamente. Verde =
+          atende o mínimo da peça; vermelho = insuficiente ou negativa. Toque numa inserção para
+          editar.
+        </p>
       </div>
 
       {/* MEUS PROJETOS (persistência do projeto inteiro) */}

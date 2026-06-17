@@ -138,6 +138,42 @@ export default function VasoExpansao() {
         <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
       </div>
 
+      {/* FORM — inputs primeiro */}
+      <div className="space-y-4">
+        <Accordion title="Dados do sistema" defaultOpen>
+          <div className="grid grid-cols-2 gap-4">
+            <SelectField
+              label="Temperatura do boiler"
+              value={f.tempBoiler}
+              onChange={(v) => set("tempBoiler", Number(v))}
+              options={opcoesTemp}
+              hint="Valores da Tabela A.1 (NBR 16057)"
+            />
+            <NumberField
+              label="Volume de água do sistema"
+              value={f.volume}
+              onChange={(v) => set("volume", v)}
+              unit="L"
+            />
+            <NumberField
+              label="Pressão da rede (Psist)"
+              value={f.pSist}
+              onChange={(v) => set("pSist", v)}
+              unit="bar"
+              step={0.1}
+            />
+            <NumberField
+              label="Pressão da válvula (Pvalv)"
+              value={f.pValv}
+              onChange={(v) => set("pValv", v)}
+              unit="bar"
+              step={0.1}
+              hint="Tem que ser maior que Psist"
+            />
+          </div>
+        </Accordion>
+      </div>
+
       {/* ALERTA de pressão inválida */}
       {denominadorRuim && (
         <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
@@ -239,42 +275,8 @@ export default function VasoExpansao() {
         </p>
       </div>
 
-      {/* FORM */}
+      {/* MEMÓRIA DE CÁLCULO — junto do resultado */}
       <div className="space-y-4">
-        <Accordion title="Dados do sistema" defaultOpen>
-          <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Temperatura do boiler"
-              value={f.tempBoiler}
-              onChange={(v) => set("tempBoiler", Number(v))}
-              options={opcoesTemp}
-              hint="Valores da Tabela A.1 (NBR 16057)"
-            />
-            <NumberField
-              label="Volume de água do sistema"
-              value={f.volume}
-              onChange={(v) => set("volume", v)}
-              unit="L"
-            />
-            <NumberField
-              label="Pressão da rede (Psist)"
-              value={f.pSist}
-              onChange={(v) => set("pSist", v)}
-              unit="bar"
-              step={0.1}
-            />
-            <NumberField
-              label="Pressão da válvula (Pvalv)"
-              value={f.pValv}
-              onChange={(v) => set("pValv", v)}
-              unit="bar"
-              step={0.1}
-              hint="Tem que ser maior que Psist"
-            />
-          </div>
-        </Accordion>
-
-        {/* MEMÓRIA DE CÁLCULO */}
         <Accordion title="Memória de cálculo NBR 16057">
           <div className="space-y-2 text-sm text-zinc-300">
             <p className="text-[12px] leading-relaxed text-zinc-400">

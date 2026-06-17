@@ -154,83 +154,6 @@ export default function Recirculacao() {
         <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
       </div>
 
-      {/* RESULT HERO (Manifold = recomendado) */}
-      <div className="glass rounded-3xl p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
-            Manifold · {f.diametroManifold} mm
-          </span>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              man.velocidadeOk
-                ? "bg-emerald-500/15 text-emerald-400"
-                : "bg-red-500/15 text-red-400"
-            }`}
-          >
-            {man.velocidadeOk ? "Velocidade OK (Caleffi)" : "Velocidade alta!"}
-          </span>
-        </div>
-
-        <PipeFlow velocidade={man.velocidade} label="água quente no manifold" />
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <Hero titulo="Água quente chega em" valor={mmss(man.tempoChegadaS)} />
-          <Hero titulo="Desperdício por abertura" valor={`${man.volumeL.toFixed(1)} L`} />
-          <Hero
-            titulo={`Após ${f.tempoParado} min parada`}
-            valor={`${man.tempAposXMin.toFixed(1)} °C`}
-          />
-          <Hero
-            titulo={`Esfria até ${f.tAlvo} °C em`}
-            valor={`${man.tempoAteAlvoMin.toFixed(1)} min`}
-          />
-        </div>
-      </div>
-
-      {/* COMPARADOR Manifold x Convencional */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Manifold × Convencional
-        </h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
-              <th className="pb-2 font-medium">Métrica</th>
-              <th className="pb-2 text-right font-medium text-amber">
-                Manifold {f.diametroManifold}
-              </th>
-              <th className="pb-2 text-right font-medium">
-                Convencional {f.diametroConvencional}
-              </th>
-            </tr>
-          </thead>
-          <tbody className="text-zinc-200">
-            <Row l="Velocidade (m/s)" a={man.velocidade.toFixed(2)} b={conv.velocidade.toFixed(2)} />
-            <Row l="Água quente chega" a={mmss(man.tempoChegadaS)} b={mmss(conv.tempoChegadaS)} />
-            <Row l="Desperdício (L)" a={man.volumeL.toFixed(1)} b={conv.volumeL.toFixed(1)} />
-            <Row
-              l="Perda regime (°C)"
-              a={man.perdaRegime.toFixed(2)}
-              b={conv.perdaRegime.toFixed(2)}
-            />
-            <Row
-              l={`Após ${f.tempoParado} min (°C)`}
-              a={man.tempAposXMin.toFixed(1)}
-              b={conv.tempAposXMin.toFixed(1)}
-            />
-            <Row
-              l={`Esfria a ${f.tAlvo}°C (min)`}
-              a={man.tempoAteAlvoMin.toFixed(1)}
-              b={conv.tempoAteAlvoMin.toFixed(1)}
-            />
-          </tbody>
-        </table>
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          O manifold entrega água quente mais rápido e desperdiça menos água fria a cada abertura —
-          o argumento técnico (e de venda) pro cliente.
-        </p>
-      </div>
-
       {/* FORM */}
       <div className="space-y-4">
         {/* cenário */}
@@ -363,6 +286,83 @@ export default function Recirculacao() {
             <Det l="Perda água parada" v={`${man.perdaAguaParadaKcal.toFixed(0)} kcal`} />
           </div>
         </Accordion>
+      </div>
+
+      {/* RESULT HERO (Manifold = recomendado) */}
+      <div className="glass rounded-3xl p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
+            Manifold · {f.diametroManifold} mm
+          </span>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+              man.velocidadeOk
+                ? "bg-emerald-500/15 text-emerald-400"
+                : "bg-red-500/15 text-red-400"
+            }`}
+          >
+            {man.velocidadeOk ? "Velocidade OK (Caleffi)" : "Velocidade alta!"}
+          </span>
+        </div>
+
+        <PipeFlow velocidade={man.velocidade} label="água quente no manifold" />
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Hero titulo="Água quente chega em" valor={mmss(man.tempoChegadaS)} />
+          <Hero titulo="Desperdício por abertura" valor={`${man.volumeL.toFixed(1)} L`} />
+          <Hero
+            titulo={`Após ${f.tempoParado} min parada`}
+            valor={`${man.tempAposXMin.toFixed(1)} °C`}
+          />
+          <Hero
+            titulo={`Esfria até ${f.tAlvo} °C em`}
+            valor={`${man.tempoAteAlvoMin.toFixed(1)} min`}
+          />
+        </div>
+      </div>
+
+      {/* COMPARADOR Manifold x Convencional */}
+      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+          Manifold × Convencional
+        </h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
+              <th className="pb-2 font-medium">Métrica</th>
+              <th className="pb-2 text-right font-medium text-amber">
+                Manifold {f.diametroManifold}
+              </th>
+              <th className="pb-2 text-right font-medium">
+                Convencional {f.diametroConvencional}
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-zinc-200">
+            <Row l="Velocidade (m/s)" a={man.velocidade.toFixed(2)} b={conv.velocidade.toFixed(2)} />
+            <Row l="Água quente chega" a={mmss(man.tempoChegadaS)} b={mmss(conv.tempoChegadaS)} />
+            <Row l="Desperdício (L)" a={man.volumeL.toFixed(1)} b={conv.volumeL.toFixed(1)} />
+            <Row
+              l="Perda regime (°C)"
+              a={man.perdaRegime.toFixed(2)}
+              b={conv.perdaRegime.toFixed(2)}
+            />
+            <Row
+              l={`Após ${f.tempoParado} min (°C)`}
+              a={man.tempAposXMin.toFixed(1)}
+              b={conv.tempAposXMin.toFixed(1)}
+            />
+            <Row
+              l={`Esfria a ${f.tAlvo}°C (min)`}
+              a={man.tempoAteAlvoMin.toFixed(1)}
+              b={conv.tempoAteAlvoMin.toFixed(1)}
+            />
+          </tbody>
+        </table>
+        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+          O manifold entrega água quente mais rápido e desperdiça menos água fria a cada abertura —
+          o argumento técnico (e de venda) pro cliente.
+        </p>
       </div>
 
       {/* MEUS PROJETOS */}

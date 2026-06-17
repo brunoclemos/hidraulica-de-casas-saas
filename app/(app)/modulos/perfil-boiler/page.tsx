@@ -171,96 +171,6 @@ export default function PerfilBoiler() {
         </div>
       )}
 
-      {/* RESULT HERO */}
-      <div className="glass rounded-3xl p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
-            Curva de temperatura · {f.duracao} min
-          </span>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              heroi.bom ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-            }`}
-          >
-            {heroi.bom ? "Conforto OK" : "Banho esfria"}
-          </span>
-        </div>
-
-        <LineChart
-          series={chart.series}
-          duracao={f.duracao}
-          yMin={chart.yMin}
-          yMax={chart.yMax}
-          refLinha={d.tAciona}
-          refLabel={`Aciona apoio (${d.tAciona.toFixed(0)} °C)`}
-          zonaAbaixoDe={f.tMistura}
-          zonaLabel="zona de banho frio"
-        />
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <Hero titulo={heroi.titulo} valor={heroi.valor} />
-          <Hero titulo="T mínima (gás)" valor={`${gas.tMin.toFixed(1)} °C`} />
-          <Hero titulo="T mínima (elétrico)" valor={`${eletrico.tMin.toFixed(1)} °C`} />
-          <Hero
-            titulo="Aciona apoio em"
-            valor={`${d.tAciona.toFixed(0)} °C`}
-          />
-        </div>
-
-        {gas.algumInsuficiente && (
-          <p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-300">
-            Atenção: a partir do minuto {gas.primeiroInsuficiente} o boiler esfria tanto que não há
-            água fria para misturar — a ducha sai abaixo da temperatura de mistura (água insuficiente).
-          </p>
-        )}
-      </div>
-
-      {/* COMPARADOR Gás × Elétrico */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Apoio a gás × elétrico
-        </h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
-              <th className="pb-2 font-medium">Métrica</th>
-              <th className="pb-2 text-right font-medium text-amber">Gás</th>
-              <th className="pb-2 text-right font-medium" style={{ color: COR_ELET }}>
-                Elétrico
-              </th>
-            </tr>
-          </thead>
-          <tbody className="text-zinc-200">
-            <Row
-              l="Ganho do apoio (°C/min)"
-              a={d.ganhoGas.toFixed(3)}
-              b={d.ganhoElet.toFixed(3)}
-            />
-            <Row l="T mínima (°C)" a={gas.tMin.toFixed(1)} b={eletrico.tMin.toFixed(1)} />
-            <Row
-              l="T mínima no minuto"
-              a={`${gas.tMinMinuto}`}
-              b={`${eletrico.tMinMinuto}`}
-            />
-            <Row
-              l="Banho frio a partir de"
-              a={gas.minutoBanhoFrio ? `${gas.minutoBanhoFrio} min` : "nunca"}
-              b={eletrico.minutoBanhoFrio ? `${eletrico.minutoBanhoFrio} min` : "nunca"}
-            />
-            <Row
-              l="Conforto mantido?"
-              a={gas.confortoMantido ? "sim" : "não"}
-              b={eletrico.confortoMantido ? "sim" : "não"}
-            />
-          </tbody>
-        </table>
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          O apoio a gás repõe muito mais calor por minuto, então segura a temperatura do boiler por
-          mais tempo durante banhos simultâneos. A resistência elétrica recupera devagar — o
-          argumento técnico (e de venda) para a central térmica a gás.
-        </p>
-      </div>
-
       {/* FORM */}
       <div className="space-y-4">
         <Accordion title="Boiler & banhos" defaultOpen>
@@ -372,7 +282,100 @@ export default function PerfilBoiler() {
             />
           </div>
         </Accordion>
+      </div>
 
+      {/* RESULT HERO */}
+      <div className="glass rounded-3xl p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
+            Curva de temperatura · {f.duracao} min
+          </span>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+              heroi.bom ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+            }`}
+          >
+            {heroi.bom ? "Conforto OK" : "Banho esfria"}
+          </span>
+        </div>
+
+        <LineChart
+          series={chart.series}
+          duracao={f.duracao}
+          yMin={chart.yMin}
+          yMax={chart.yMax}
+          refLinha={d.tAciona}
+          refLabel={`Aciona apoio (${d.tAciona.toFixed(0)} °C)`}
+          zonaAbaixoDe={f.tMistura}
+          zonaLabel="zona de banho frio"
+        />
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Hero titulo={heroi.titulo} valor={heroi.valor} />
+          <Hero titulo="T mínima (gás)" valor={`${gas.tMin.toFixed(1)} °C`} />
+          <Hero titulo="T mínima (elétrico)" valor={`${eletrico.tMin.toFixed(1)} °C`} />
+          <Hero
+            titulo="Aciona apoio em"
+            valor={`${d.tAciona.toFixed(0)} °C`}
+          />
+        </div>
+
+        {gas.algumInsuficiente && (
+          <p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-300">
+            Atenção: a partir do minuto {gas.primeiroInsuficiente} o boiler esfria tanto que não há
+            água fria para misturar — a ducha sai abaixo da temperatura de mistura (água insuficiente).
+          </p>
+        )}
+      </div>
+
+      {/* COMPARADOR Gás × Elétrico */}
+      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+          Apoio a gás × elétrico
+        </h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
+              <th className="pb-2 font-medium">Métrica</th>
+              <th className="pb-2 text-right font-medium text-amber">Gás</th>
+              <th className="pb-2 text-right font-medium" style={{ color: COR_ELET }}>
+                Elétrico
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-zinc-200">
+            <Row
+              l="Ganho do apoio (°C/min)"
+              a={d.ganhoGas.toFixed(3)}
+              b={d.ganhoElet.toFixed(3)}
+            />
+            <Row l="T mínima (°C)" a={gas.tMin.toFixed(1)} b={eletrico.tMin.toFixed(1)} />
+            <Row
+              l="T mínima no minuto"
+              a={`${gas.tMinMinuto}`}
+              b={`${eletrico.tMinMinuto}`}
+            />
+            <Row
+              l="Banho frio a partir de"
+              a={gas.minutoBanhoFrio ? `${gas.minutoBanhoFrio} min` : "nunca"}
+              b={eletrico.minutoBanhoFrio ? `${eletrico.minutoBanhoFrio} min` : "nunca"}
+            />
+            <Row
+              l="Conforto mantido?"
+              a={gas.confortoMantido ? "sim" : "não"}
+              b={eletrico.confortoMantido ? "sim" : "não"}
+            />
+          </tbody>
+        </table>
+        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+          O apoio a gás repõe muito mais calor por minuto, então segura a temperatura do boiler por
+          mais tempo durante banhos simultâneos. A resistência elétrica recupera devagar — o
+          argumento técnico (e de venda) para a central térmica a gás.
+        </p>
+      </div>
+
+      {/* RESULT: detalhes técnicos + tabela minuto a minuto */}
+      <div className="space-y-4">
         <Accordion title="Detalhes técnicos (auditar)">
           <div className="grid grid-cols-2 gap-3 text-sm text-zinc-300">
             <Det l="Vazão de mistura (N×Q)" v={`${d.vazaoMistura.toFixed(1)} L/min`} />
