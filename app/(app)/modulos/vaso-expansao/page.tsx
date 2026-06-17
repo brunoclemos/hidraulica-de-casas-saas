@@ -7,6 +7,7 @@ import {
   Inputs,
   TABELA_A1,
   coefNBR,
+  vasoComercialAcima,
 } from "@/lib/calc/vaso-expansao";
 import { NumberField, SelectField, Accordion } from "@/components/Fields";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
@@ -112,6 +113,8 @@ export default function VasoExpansao() {
   // --- cálculo ao vivo ---
   const r = useMemo(() => calcular(toInputs(f)), [f]);
   const coefInfo = useMemo(() => coefNBR(f.tempBoiler), [f.tempBoiler]);
+  // método principal = NBR (o que o cliente usa, e o menor). Caleffi = 2ª verificação.
+  const vasoNBR = vasoComercialAcima(r.nbr.volumeVaso);
 
   const opcoesTemp = TABELA_A1.map((t) => ({
     value: t.temp,
@@ -186,22 +189,20 @@ export default function VasoExpansao() {
         </div>
       )}
 
-      {/* RESULT HERO — volume a adotar */}
+      {/* RESULT HERO — volume a adotar (NBR é o método principal) */}
       <div className="glass rounded-3xl p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
             Volume a adotar
           </span>
-          {r.metodoAdotado && (
-            <span className="rounded-full bg-amber/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber">
-              maior método: {r.metodoAdotado}
-            </span>
-          )}
+          <span className="rounded-full bg-amber/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber">
+            método NBR 16057
+          </span>
         </div>
 
         <div className="flex items-end gap-3">
           <div className="font-display text-5xl font-bold leading-none text-amber">
-            {isFinite(r.volumeAdotado) ? r.volumeAdotado.toFixed(1) : "—"}
+            {isFinite(r.nbr.volumeVaso) ? r.nbr.volumeVaso.toFixed(1) : "—"}
           </div>
           <div className="pb-1 text-lg font-semibold text-zinc-400">L mínimo</div>
         </div>
@@ -211,42 +212,35 @@ export default function VasoExpansao() {
             Vaso comercial recomendado
           </div>
           <div className="mt-0.5 font-display text-2xl font-bold text-zinc-100">
-            {r.vasoComercial !== null
-              ? `${r.vasoComercial} L`
-              : isFinite(r.volumeAdotado)
+            {vasoNBR !== null
+              ? `${vasoNBR} L`
+              : isFinite(r.nbr.volumeVaso)
               ? "acima de 200 L (consultar fabricante)"
               : "—"}
           </div>
           <p className="mt-1 text-[11px] text-zinc-500">
             Menor vaso de catálogo (8 / 12 / 18 / 24 / 50 / 100 / 200 L) que cobre o
-            volume mínimo calculado.
+            volume mínimo da NBR.
           </p>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between rounded-xl border border-ink-600 px-3 py-2 text-sm">
+          <span className="text-zinc-500">Caleffi · 2ª verificação</span>
+          <span className="font-semibold text-zinc-300">{fmtL(r.caleffi.volumeVaso)}</span>
         </div>
       </div>
 
       {/* COMPARADOR NBR x Caleffi */}
       <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
         <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          NBR 16057 × Caleffi
+          NBR 16057 <span className="text-zinc-500">(principal)</span> × Caleffi
         </h3>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
               <th className="pb-2 font-medium">Métrica</th>
-              <th
-                className={`pb-2 text-right font-medium ${
-                  r.metodoAdotado === "NBR 16057" ? "text-amber" : "text-zinc-300"
-                }`}
-              >
-                NBR 16057
-              </th>
-              <th
-                className={`pb-2 text-right font-medium ${
-                  r.metodoAdotado === "Caleffi" ? "text-amber" : "text-zinc-300"
-                }`}
-              >
-                Caleffi
-              </th>
+              <th className="pb-2 text-right font-medium text-amber">NBR 16057</th>
+              <th className="pb-2 text-right font-medium text-zinc-300">Caleffi (2ª verif.)</th>
             </tr>
           </thead>
           <tbody className="text-zinc-200">
@@ -254,8 +248,7 @@ export default function VasoExpansao() {
               l="Volume do vaso"
               a={fmtL(r.nbr.volumeVaso)}
               b={fmtL(r.caleffi.volumeVaso)}
-              destaqueA={r.metodoAdotado === "NBR 16057"}
-              destaqueB={r.metodoAdotado === "Caleffi"}
+              destaqueA
             />
             <Row
               l="Coef. dilatação (e)"
@@ -263,15 +256,14 @@ export default function VasoExpansao() {
               b={fmtCoef(r.caleffi.coef)}
             />
             <Row l="Folga 0,5% (Vv)" a="—" b={fmtL(r.caleffi.vv)} />
-            <Row l="Denominador" a={r.nbr.denominador.toFixed(4)} b={r.caleffi.denominador.toFixed(4)} />
           </tbody>
         </table>
         <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          Os dois métodos divergem porque a NBR usa o coeficiente tabelado (Tabela A.1,
-          relativo a 4 °C) e relação de pressões com a válvula <em>cheia</em>, enquanto o
-          Caleffi calcula o coeficiente por fórmula, soma uma folga fixa de 0,5% do
-          volume (Vv) e desconta 0,5 bar da válvula (margem de segurança). Por isso o
-          Caleffi tende a dar um volume maior e mais conservador — adote o maior.
+          A <strong className="text-zinc-300">NBR 16057</strong> é o método principal (é o
+          que a norma exige e o que vocês usam). O <strong className="text-zinc-300">Caleffi</strong>{" "}
+          entra só como segunda verificação: usa o coeficiente por fórmula, soma uma folga de
+          0,5% do volume (Vv) e desconta 0,5 bar da válvula, então costuma dar um valor maior
+          e mais conservador. Use a NBR para especificar e o Caleffi para conferir.
         </p>
       </div>
 

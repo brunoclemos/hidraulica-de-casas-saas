@@ -16,6 +16,11 @@ import {
   pontosPadrao,
   eletrosPadrao,
 } from "@/lib/calc/caixa-boiler-solar";
+import {
+  MARCAS_COLETOR,
+  modelosDaMarca,
+  acharColetor,
+} from "@/lib/calc/inmetro-coletores";
 import { NumberField, SelectField, Stepper, Accordion } from "@/components/Fields";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
 import {
@@ -36,6 +41,8 @@ interface Form {
   pontos: PontoConsumo[];
   eletros: Eletro[];
   producaoColetor: number;
+  marcaColetor: string; // seletor INMETRO (vazio = manual)
+  modeloColetor: string;
   clima: Clima;
   orientacao: Orientacao;
 }
@@ -48,8 +55,19 @@ const PADRAO: Form = {
   pontos: pontosPadrao(),
   eletros: eletrosPadrao(),
   producaoColetor: 166.4,
+  marcaColetor: "",
+  modeloColetor: "",
   clima: "quente",
   orientacao: "45-norte",
+};
+
+// cor da etiqueta PBE (A..E)
+const COR_CLASSE: Record<string, string> = {
+  A: "bg-emerald-500/15 text-emerald-400",
+  B: "bg-lime-500/15 text-lime-400",
+  C: "bg-yellow-500/15 text-yellow-400",
+  D: "bg-orange-500/15 text-orange-400",
+  E: "bg-red-500/15 text-red-400",
 };
 
 function toInputs(f: Form): Inputs {
@@ -89,6 +107,19 @@ export default function CaixaBoilerSolar() {
       ...p,
       eletros: p.eletros.map((x) => (x.id === id ? { ...x, ...patch } : x)),
     }));
+
+  // seletor de coletor INMETRO: escolher marca → modelo preenche a produção
+  const selMarca = (marca: string) =>
+    setF((p) => ({ ...p, marcaColetor: marca, modeloColetor: "" }));
+  const selModelo = (modelo: string) => {
+    const c = acharColetor(f.marcaColetor, modelo);
+    setF((p) => ({
+      ...p,
+      modeloColetor: modelo,
+      producaoColetor: c ? c.producao : p.producaoColetor,
+    }));
+  };
+  const coletorSel = f.modeloColetor ? acharColetor(f.marcaColetor, f.modeloColetor) : undefined;
 
   // --- estado de salvamento ("Meus Projetos") ---
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -249,8 +280,8 @@ export default function CaixaBoilerSolar() {
         </div>
       </Accordion>
 
-      {/* ELETRODOMÉSTICOS */}
-      <Accordion title="Eletrodomésticos">
+      {/* APARELHOS ESPECIAIS */}
+      <Accordion title="Aparelhos especiais">
         <div className="space-y-4">
           {f.eletros.map((e) => (
             <div key={e.id} className="rounded-xl border border-ink-600 bg-ink-900/40 p-3">
@@ -305,12 +336,55 @@ export default function CaixaBoilerSolar() {
       {/* COLETOR / CLIMA / ORIENTAÇÃO */}
       <Accordion title="Coletor solar, clima & orientação" defaultOpen>
         <div className="grid grid-cols-1 gap-4">
+          {/* seletor INMETRO: marca → modelo (puxa produção + classificação) */}
+          <SelectField
+            label="Fabricante / marca"
+            value={f.marcaColetor}
+            onChange={(v) => selMarca(String(v))}
+            options={[
+              { value: "", label: "— escolher (ou digitar manual abaixo) —" },
+              ...MARCAS_COLETOR.map((m) => ({ value: m, label: m })),
+            ]}
+          />
+          {f.marcaColetor && (
+            <SelectField
+              label="Modelo do coletor"
+              value={f.modeloColetor}
+              onChange={(v) => selModelo(String(v))}
+              options={[
+                { value: "", label: "— escolher modelo —" },
+                ...modelosDaMarca(f.marcaColetor).map((c) => ({
+                  value: c.modelo,
+                  label: `${c.modelo} · ${c.producao} kWh/mês · classe ${c.classificacao}`,
+                })),
+              ]}
+            />
+          )}
+          {coletorSel && (
+            <div className="flex items-center justify-between rounded-xl border border-ink-600 bg-ink-900/40 px-4 py-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-zinc-100">
+                  {coletorSel.marca} {coletorSel.modelo}
+                </div>
+                <div className="text-[11px] text-zinc-500">
+                  {coletorSel.producao} kWh/mês · {fmt(coletorSel.eficiencia, 1)}% efic. · {fmt(coletorSel.area, 1)} m²
+                </div>
+              </div>
+              <span
+                className={`ml-3 rounded-lg px-2.5 py-1 font-display text-sm font-bold ${
+                  COR_CLASSE[coletorSel.classificacao] ?? "bg-zinc-100/5 text-zinc-300"
+                }`}
+              >
+                {coletorSel.classificacao}
+              </span>
+            </div>
+          )}
           <NumberField
             label="Produção do coletor (INMETRO)"
             value={f.producaoColetor}
             onChange={(v) => set("producaoColetor", v)}
             unit="kWh/mês"
-            hint="Tabela de eficiência energética do INMETRO."
+            hint="Preenchido pelo modelo escolhido — ou edite manual. Tabela PBE/INMETRO (524 modelos)."
           />
           <SelectField
             label="Clima da região"
@@ -351,8 +425,8 @@ export default function CaixaBoilerSolar() {
         <div className="mt-4 grid grid-cols-2 gap-3">
           <Det l="Consumo total / dia" v={`${fmt(r.consumoTotal, 0)} L`} />
           <Det l="Volume água fria" v={`${fmt(r.volFria, 0)} L`} />
-          <Det l="% água quente" v={`${fmt(r.pctAQ, 1)} %`} />
-          <Det l="% água fria" v={`${fmt(r.pctAF, 1)} %`} />
+          <Det l="% água quente (mistura)" v={`${fmt(r.pctMisturaAQ, 1)} %`} />
+          <Det l="% água fria (mistura)" v={`${fmt(100 - r.pctMisturaAQ, 1)} %`} />
         </div>
       </div>
 

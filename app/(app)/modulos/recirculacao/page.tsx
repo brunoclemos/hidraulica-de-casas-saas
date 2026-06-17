@@ -307,7 +307,20 @@ export default function Recirculacao() {
 
         <PipeFlow velocidade={man.velocidade} label="água quente no manifold" />
 
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        {/* destaque pedido pelo cliente: a temperatura real que chega no ponto */}
+        <div className="mt-4 rounded-2xl border border-amber/30 bg-amber/5 p-3 text-center">
+          <div className="text-[11px] uppercase tracking-wider text-amber/80">
+            Temperatura na chegada
+          </div>
+          <div className="font-display text-3xl font-bold text-amber">
+            {man.tFinalReal.toFixed(1)} °C
+          </div>
+          <div className="mt-0.5 text-[11px] text-zinc-500">
+            temperatura real no ponto · perde {man.perdaRegime.toFixed(2)} °C até o fim do trecho
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <Hero titulo="Água quente chega em" valor={mmss(man.tempoChegadaS)} />
           <Hero titulo="Desperdício por abertura" valor={`${man.volumeL.toFixed(1)} L`} />
           <Hero
@@ -339,23 +352,28 @@ export default function Recirculacao() {
             </tr>
           </thead>
           <tbody className="text-zinc-200">
-            <Row l="Velocidade (m/s)" a={man.velocidade.toFixed(2)} b={conv.velocidade.toFixed(2)} />
-            <Row l="Água quente chega" a={mmss(man.tempoChegadaS)} b={mmss(conv.tempoChegadaS)} />
-            <Row l="Desperdício (L)" a={man.volumeL.toFixed(1)} b={conv.volumeL.toFixed(1)} />
+            <Row l="Velocidade" a={`${man.velocidade.toFixed(2)} m/s`} b={`${conv.velocidade.toFixed(2)} m/s`} />
+            <Row l="Água quente chega" a={`${mmss(man.tempoChegadaS)} min`} b={`${mmss(conv.tempoChegadaS)} min`} />
+            <Row l="Desperdício" a={`${man.volumeL.toFixed(1)} L`} b={`${conv.volumeL.toFixed(1)} L`} />
             <Row
-              l="Perda regime (°C)"
-              a={man.perdaRegime.toFixed(2)}
-              b={conv.perdaRegime.toFixed(2)}
+              l="Temperatura na chegada"
+              a={`${man.tFinalReal.toFixed(1)} °C`}
+              b={`${conv.tFinalReal.toFixed(1)} °C`}
             />
             <Row
-              l={`Após ${f.tempoParado} min (°C)`}
-              a={man.tempAposXMin.toFixed(1)}
-              b={conv.tempAposXMin.toFixed(1)}
+              l="Perda até o ponto"
+              a={`${man.perdaRegime.toFixed(2)} °C`}
+              b={`${conv.perdaRegime.toFixed(2)} °C`}
             />
             <Row
-              l={`Esfria a ${f.tAlvo}°C (min)`}
-              a={man.tempoAteAlvoMin.toFixed(1)}
-              b={conv.tempoAteAlvoMin.toFixed(1)}
+              l={`Após ${f.tempoParado} min parada`}
+              a={`${man.tempAposXMin.toFixed(1)} °C`}
+              b={`${conv.tempAposXMin.toFixed(1)} °C`}
+            />
+            <Row
+              l={`Esfria a ${f.tAlvo} °C`}
+              a={`${man.tempoAteAlvoMin.toFixed(1)} min`}
+              b={`${conv.tempoAteAlvoMin.toFixed(1)} min`}
             />
           </tbody>
         </table>
