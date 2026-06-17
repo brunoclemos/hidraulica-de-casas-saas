@@ -6,10 +6,16 @@
 import { diametroInterno, CALEFFI_VEL, FIS } from "./tables";
 
 export type Cenario = "ar" | "solo";
+export type Tipo = "manifold" | "convencional";
 
 export interface Inputs {
   vazao: number; // L/min por ponto
   pontos: number; // pontos simultâneos
+  // tipo do traçado — define a vazão usada na VELOCIDADE (igual à planilha):
+  //   manifold    -> cada ramal leva a vazão de 1 ponto (vazão por ponto)
+  //   convencional-> o tronco leva a vazão total (vazão × pontos)
+  // (a vazão mássica da troca térmica usa a vazão TOTAL nos dois casos, como na planilha)
+  tipo: Tipo;
   diametro: number; // diâmetro comercial CPVC (mm)
   distancia: number; // m
   tAmbiente: number; // °C (meio externo: ar do shaft ou solo)
@@ -51,8 +57,9 @@ export function calcular(i: Inputs): Resultado {
   const vazaoTotal = i.vazao * i.pontos; // L/min
 
   const area = (Math.pow(dIntM, 2) * PI) / 4; // m²
-  // velocidade (m/s) com a vazão total
-  const velocidade = (4 * (vazaoTotal / 60) / 1000) / (PI * Math.pow(dIntM, 2));
+  // vazão que define a velocidade: por ponto (manifold) ou total (convencional) — igual à planilha
+  const vazaoVel = i.tipo === "manifold" ? i.vazao : vazaoTotal;
+  const velocidade = (4 * (vazaoVel / 60) / 1000) / (PI * Math.pow(dIntM, 2));
 
   const velMaxCaleffi = CALEFFI_VEL[i.diametro] ?? NaN;
   const velocidadeOk = velocidade <= velMaxCaleffi;

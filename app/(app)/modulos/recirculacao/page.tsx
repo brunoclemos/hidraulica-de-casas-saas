@@ -51,10 +51,11 @@ const PADRAO: Form = {
   raioSolo: 0.5,
 };
 
-function toInputs(f: Form, diametro: number): Inputs {
+function toInputs(f: Form, diametro: number, tipo: Inputs["tipo"]): Inputs {
   return {
     vazao: f.vazao,
     pontos: f.pontos,
+    tipo,
     diametro,
     distancia: f.distancia,
     tAmbiente: f.tAmbiente,
@@ -131,8 +132,8 @@ export default function Recirculacao() {
   }
 
   // --- cálculo ao vivo ---
-  const man = useMemo(() => calcular(toInputs(f, f.diametroManifold)), [f]);
-  const conv = useMemo(() => calcular(toInputs(f, f.diametroConvencional)), [f]);
+  const man = useMemo(() => calcular(toInputs(f, f.diametroManifold, "manifold")), [f]);
+  const conv = useMemo(() => calcular(toInputs(f, f.diametroConvencional, "convencional")), [f]);
 
   const opcoesDiam = CPVC.map((c) => ({ value: c.comercial, label: c.rotulo }));
 
