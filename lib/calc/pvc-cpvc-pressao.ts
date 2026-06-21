@@ -11,8 +11,9 @@
 //    que vem como #VALUE! no xlsx sem macro. Reimplementamos o fator de atrito por
 //    BISSECÇÃO em TS (não dependemos de VBA).
 //  - Tratamento de Q = 0 / Re = 0 -> perda de carga = 0 (evita divisão por zero / NaN).
-//  - desnível: o spec define desnível = SOBE - DESCE (a planilha tinha SUM(DESCE-SOBE),
-//    sinal invertido); seguimos o spec e rotulamos claramente SOBE/DESCE.
+//  - desnível: PARIDADE com a planilha -> desnível = DESCE - SOBE. Subir tubulação PERDE
+//    pressão estática (desnível negativo); descer GANHA. (Uma versão anterior seguia um
+//    "spec" que invertia o sinal -> residual não batia com o curso; corrigido.)
 //
 // As tabelas (pesos, diâmetro interno, comp. equivalente, viscosidade, K) foram extraídas
 // via python+openpyxl da aba oculta "Dados e Planilhas" e estão ao final deste arquivo.
@@ -92,102 +93,14 @@ export const VISCOSIDADE: { temp: number; mu: number }[] = [
 // ---------------------------------------------------------------------------
 // COMPRIMENTO EQUIVALENTE (m) por conexão x diâmetro comercial.
 //
-// IMPORTANTE: a matriz completa da planilha tem ~17 conexões (PVC, A62:Q72) e
-// ~32 conexões (CPVC, B94:AH104). Incluímos aqui um SUBCONJUNTO CURADO das
-// conexões MAIS COMUNS em hidráulica predial — joelho 90°, curva 90°,
-// tê passagem direta, tê saída lateral, registro de gaveta, luva e válvula
-// de retenção. Os valores são REAIS, copiados da planilha; NÃO foram inventados.
-// (Ver nota na UI.) Para o conjunto completo, o SaaS final puxa do banco.
+// A matriz COMPLETA da planilha (PVC 16 conexões B62:Q72, CPVC 32 conexões
+// B94:AH104) vive em ./conexoes.ts, AUTOGERADO da planilha. Reexportamos aqui
+// para manter a API do módulo estável (page.tsx importa daqui).
 // ---------------------------------------------------------------------------
 
-export interface ConexaoDef {
-  id: string;
-  nome: string;
-  // valor de comp. equivalente (m) por diâmetro comercial
-  valores: Record<number, number>;
-}
-
-// PVC — subconjunto curado (linhas A64:A72, colunas escolhidas de B62:Q62).
-export const CONEXOES_PVC: ConexaoDef[] = [
-  {
-    id: "joelho90",
-    nome: "Joelho 90°",
-    valores: { 20: 1.1, 25: 1.2, 32: 1.5, 40: 2, 50: 3.2, 60: 3.4, 75: 3.7, 85: 3.9, 110: 4.3 },
-  },
-  {
-    id: "curva90",
-    nome: "Curva 90°",
-    valores: { 20: 0.4, 25: 0.5, 32: 0.6, 40: 0.7, 50: 1.2, 60: 1.3, 75: 1.4, 85: 1.5, 110: 1.6 },
-  },
-  {
-    id: "te_direta",
-    nome: "Tê passagem direta",
-    valores: { 20: 0.7, 25: 0.8, 32: 0.9, 40: 1.5, 50: 2.2, 60: 2.3, 75: 2.4, 85: 2.5, 110: 2.6 },
-  },
-  {
-    id: "te_lateral",
-    nome: "Tê passagem lateral",
-    valores: { 20: 2.3, 25: 2.4, 32: 3.1, 40: 4.6, 50: 7.3, 60: 7.6, 75: 7.8, 85: 8, 110: 8.3 },
-  },
-  {
-    id: "luva",
-    nome: "Luva (entrada normal)",
-    valores: { 20: 0.3, 25: 0.4, 32: 0.5, 40: 0.6, 50: 1, 60: 1.5, 75: 1.6, 85: 2, 110: 2.2 },
-  },
-  {
-    id: "reg_gaveta",
-    nome: "Registro de gaveta aberto",
-    valores: { 20: 0.1, 25: 0.2, 32: 0.3, 40: 0.4, 50: 0.7, 60: 0.8, 75: 0.9, 85: 0.9, 110: 1 },
-  },
-  {
-    id: "valv_retencao",
-    nome: "Válvula de retenção (tipo leve)",
-    valores: { 20: 2.5, 25: 2.7, 32: 3.8, 40: 4.9, 50: 6.8, 60: 7.1, 75: 8.2, 85: 9.3, 110: 10.4 },
-  },
-];
-
-// CPVC — subconjunto curado (linhas A96:A104, colunas escolhidas de B94:AH94).
-export const CONEXOES_CPVC: ConexaoDef[] = [
-  {
-    id: "joelho90",
-    nome: "Joelho 90°",
-    valores: { 15: 0.88, 22: 1.513, 28: 2.049, 35: 2.639, 42: 3.287, 54: 4.555, 73: 6.656, 89: 8.429, 114: 11.406 },
-  },
-  {
-    id: "curva90",
-    nome: "Curva 90°",
-    valores: { 15: 0.396, 22: 0.681, 28: 0.922, 35: 1.188, 42: 1.479, 54: 2.05, 73: 2.995, 89: 3.793, 114: 5.133 },
-  },
-  {
-    id: "te_direta",
-    nome: "Tê passagem direta e saída lateral",
-    valores: { 15: 0.792, 22: 1.361, 28: 1.844, 35: 2.375, 42: 2.958, 54: 4.1, 73: 5.99, 89: 7.586, 114: 10.265 },
-  },
-  {
-    id: "te_lateral",
-    nome: "Tê saída bilateral",
-    valores: { 15: 0.968, 22: 1.664, 28: 2.254, 35: 2.903, 42: 3.615, 54: 5.011, 73: 7.321, 89: 9.272, 114: 12.547 },
-  },
-  {
-    id: "luva",
-    nome: "Luva simples",
-    valores: { 15: 0.11, 22: 0.189, 28: 0.256, 35: 0.33, 42: 0.411, 54: 0.569, 73: 0.832, 89: 1.054, 114: 1.426 },
-  },
-  {
-    id: "reg_gaveta",
-    nome: "Registro de gaveta aberto",
-    valores: { 15: 0.1, 22: 0.2, 28: 0.3, 35: 0.4, 42: 0.7, 54: 0.8, 73: 0.9, 89: 0.9, 114: 1 },
-  },
-  {
-    id: "valv_retencao",
-    nome: "Válvula de retenção (tipo leve)",
-    valores: { 15: 2.5, 22: 2.7, 28: 3.8, 35: 4.9, 42: 6.8, 54: 7.1, 73: 8.2, 89: 9.3, 114: 10.4 },
-  },
-];
-
-export function conexoesDe(material: Material): ConexaoDef[] {
-  return material === "PVC" ? CONEXOES_PVC : CONEXOES_CPVC;
-}
+export { CONEXOES_PVC, CONEXOES_CPVC, conexoesDe } from "./conexoes";
+export type { ConexaoDef } from "./conexoes";
+import { conexoesDe } from "./conexoes";
 
 export function diametrosDe(material: Material): { comercial: number; interno: number; rotulo: string }[] {
   return DIAMETROS[material];
@@ -262,7 +175,9 @@ export interface ResultadoTrecho {
 // ---------------------------------------------------------------------------
 
 // Soma dos pesos relativos das peças do trecho.
-function somaDosPesos(pecas: Record<string, number>): number {
+// (pecas pode vir undefined de projeto salvo em schema antigo -> trata como vazio.)
+function somaDosPesos(pecas: Record<string, number> | undefined | null): number {
+  if (!pecas) return 0;
   let s = 0;
   for (const p of PECAS_UTILIZACAO) {
     const q = pecas[p.nome] ?? 0;
@@ -272,7 +187,13 @@ function somaDosPesos(pecas: Record<string, number>): number {
 }
 
 // Comprimento equivalente = Σ (qtd * valor da tabela[conexao][bitola]).
-function comprimentoEquivalente(material: Material, diametro: number, conexoes: QtdConexoes): number {
+// (conexoes pode vir undefined de projeto salvo em schema antigo -> trata como vazio.)
+function comprimentoEquivalente(
+  material: Material,
+  diametro: number,
+  conexoes: QtdConexoes | undefined | null,
+): number {
+  if (!conexoes) return 0;
   let total = 0;
   for (const c of conexoesDe(material)) {
     const q = conexoes[c.id] ?? 0;
@@ -410,7 +331,7 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
       : 0;
 
   // --- pressões ---
-  const desnivel = t.sobe - t.desce; // spec: SOBE - DESCE
+  const desnivel = t.desce - t.sobe; // paridade c/ a planilha: subir perde pressão
   const pressaoDisponivel = desnivel + t.incrementoPressurizador + residualAnterior;
   const pressaoResidual =
     pressaoDisponivel - perdaCargaTotal - perdaRegistroPressao - perdaValvulaMisturadora;
@@ -450,7 +371,35 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
 // ---------------------------------------------------------------------------
 
 export interface TrechoSalvo extends Trecho {
-  nome: string;
+  ambiente: string; // ex.: "Banheiro suíte" (hierarquia: projeto > ambiente > trechos)
+  nome: string; // nome/identificação do trecho, ex.: "A-B"
+}
+
+// Normaliza um trecho possivelmente vindo de um schema ANTIGO do localStorage
+// (sem `ambiente`, `conexoes`, `pecas` ou com campos numéricos ausentes).
+// Garante que o motor de cálculo e a UI nunca recebam undefined -> evita o
+// crash "client-side exception" ao abrir/editar projetos salvos.
+export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): TrechoSalvo {
+  const material: Material = raw?.material === "CPVC" ? "CPVC" : "PVC";
+  const base = trechoPadrao(material);
+  const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+  return {
+    material,
+    diametro: num(raw?.diametro, base.diametro),
+    comprimentoReal: num(raw?.comprimentoReal, base.comprimentoReal),
+    pecas: raw?.pecas && typeof raw.pecas === "object" ? raw.pecas : {},
+    conexoes: raw?.conexoes && typeof raw.conexoes === "object" ? raw.conexoes : {},
+    sobe: num(raw?.sobe, 0),
+    desce: num(raw?.desce, 0),
+    incrementoPressurizador: num(raw?.incrementoPressurizador, 0),
+    qtdRegistroPressao: num(raw?.qtdRegistroPressao, 0),
+    qtdValvulaMisturadora: num(raw?.qtdValvulaMisturadora, 0),
+    temperaturaAgua: num(raw?.temperaturaAgua, base.temperaturaAgua),
+    pecaMinima: typeof raw?.pecaMinima === "string" ? raw.pecaMinima : base.pecaMinima,
+    // campo novo: projetos antigos guardavam tudo em `nome` -> herdamos como ambiente vazio.
+    ambiente: typeof raw?.ambiente === "string" ? raw.ambiente : "",
+    nome: typeof raw?.nome === "string" ? raw.nome : "",
+  };
 }
 
 export function calcularProjeto(
@@ -458,8 +407,9 @@ export function calcularProjeto(
   residualInicial: number,
 ): { trecho: TrechoSalvo; resultado: ResultadoTrecho }[] {
   const saida: { trecho: TrechoSalvo; resultado: ResultadoTrecho }[] = [];
-  let residual = residualInicial;
-  for (const t of trechos) {
+  let residual = Number.isFinite(residualInicial) ? residualInicial : 0;
+  for (const raw of trechos ?? []) {
+    const t = normalizarTrecho(raw); // tolera trecho de schema antigo
     const r = calcularTrecho(t, residual);
     saida.push({ trecho: t, resultado: r });
     residual = r.pressaoResidual; // encadeia

@@ -6,6 +6,7 @@ import {
   calcularTrecho,
   calcularProjeto,
   trechoPadrao,
+  normalizarTrecho,
   diametrosDe,
   conexoesDe,
   PECAS_UTILIZACAO,
@@ -16,6 +17,7 @@ import {
 import { NumberField, SelectField, Stepper, Accordion } from "@/components/Fields";
 import { PipeFlow } from "@/components/PipeFlow";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
   listarProjetos,
   salvarProjeto,
@@ -40,6 +42,9 @@ function freshDraft(material: Material, count: number, base?: TrechoSalvo): Trec
   const d = trechoPadrao(material);
   return {
     ...d,
+    // ambiente é "pegajoso": o engenheiro costuma inserir vários trechos no mesmo
+    // ambiente em sequência (ex.: Banheiro suíte: A-B, B-C, C-D).
+    ambiente: base?.ambiente ?? "",
     nome: `Trecho ${count + 1}`,
     // mantém escolhas comuns entre inserções para agilizar (engenheiro repete bitola/peça)
     diametro: base?.diametro ?? d.diametro,
@@ -93,7 +98,19 @@ export default function PvcCpvcPressao() {
   }
 
   function carregar(p: Projeto) {
-    const inputs = p.inputs as Form;
+    const raw = (p.inputs ?? {}) as Partial<Form>;
+    // MIGRAÇÃO: projetos salvos em schema antigo podem não ter `trechos`, ou ter
+    // trechos sem `ambiente`/`conexoes`/`pecas`. Normalizamos tudo aqui para não
+    // estourar "client-side exception" ao abrir/editar (era o bug do feedback).
+    const material: Material = raw.material === "CPVC" ? "CPVC" : "PVC";
+    const inputs: Form = {
+      material,
+      residualInicial:
+        typeof raw.residualInicial === "number" && Number.isFinite(raw.residualInicial)
+          ? raw.residualInicial
+          : PADRAO.residualInicial,
+      trechos: Array.isArray(raw.trechos) ? raw.trechos.map(normalizarTrecho) : [],
+    };
     setF(inputs);
     setDraft(freshDraft(inputs.material, inputs.trechos.length));
     setEditIndex(null);
@@ -141,7 +158,10 @@ export default function PvcCpvcPressao() {
     [f.trechos, f.residualInicial],
   );
 
-  // pressão de entrada do rascunho: fim da cadeia (nova) ou anterior ao índice editado
+  // pressão de entrada do rascunho: fim da cadeia (nova) ou anterior ao índice editado.
+  // Acessos com optional-chaining + fallback: se editIndex ficar momentaneamente fora
+  // de range (ex.: excluir trechos enquanto edita, antes do re-render reindexar), não
+  // estoura "client-side exception" — cai para a pressão de entrada do projeto.
   const entradaDraft =
     editIndex === null
       ? projeto.length
@@ -149,7 +169,7 @@ export default function PvcCpvcPressao() {
         : f.residualInicial
       : editIndex === 0
         ? f.residualInicial
-        : projeto[editIndex - 1].resultado.pressaoResidual;
+        : projeto[editIndex - 1]?.resultado.pressaoResidual ?? f.residualInicial;
 
   const r = useMemo(() => calcularTrecho(draft, entradaDraft), [draft, entradaDraft]);
 
@@ -158,6 +178,20 @@ export default function PvcCpvcPressao() {
   const criticaResidual = projeto.length
     ? Math.min(...projeto.map((p) => p.resultado.pressaoResidual))
     : null;
+
+  // agrupa as inserções por AMBIENTE (hierarquia projeto › ambiente › trechos),
+  // preservando o índice global de cada trecho (usado em editar/excluir/encadeamento).
+  type ProjItem = (typeof projeto)[number];
+  type Grupo = { ambiente: string; itens: { p: ProjItem; i: number }[] };
+  const grupos = useMemo<Grupo[]>(() => {
+    const map = new Map<string, Grupo>();
+    projeto.forEach((p: ProjItem, i: number) => {
+      const amb = p.trecho.ambiente?.trim() || "Sem ambiente";
+      if (!map.has(amb)) map.set(amb, { ambiente: amb, itens: [] });
+      map.get(amb)!.itens.push({ p, i });
+    });
+    return Array.from(map.values());
+  }, [projeto]);
 
   // ações de inserção (igual às macros: vai inserindo, NÃO fecha o projeto)
   function inserir() {
@@ -175,7 +209,7 @@ export default function PvcCpvcPressao() {
     setEditIndex(null);
   }
   function editar(i: number) {
-    setDraft({ ...f.trechos[i] });
+    setDraft(normalizarTrecho(f.trechos[i])); // tolera trecho de schema antigo
     setEditIndex(i);
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -185,7 +219,13 @@ export default function PvcCpvcPressao() {
   }
   function excluirInsercao(i: number) {
     setF((p) => ({ ...p, trechos: p.trechos.filter((_, idx) => idx !== i) }));
-    if (editIndex === i) cancelarEdicao();
+    // Reindexa a edição em curso: excluir o próprio trecho editado cancela; excluir
+    // um trecho de índice MENOR desloca o array, então editIndex precisa decrementar
+    // (senão salvarEdicao gravaria no trecho errado e entradaDraft sairia de range).
+    if (editIndex !== null) {
+      if (editIndex === i) cancelarEdicao();
+      else if (i < editIndex) setEditIndex(editIndex - 1);
+    }
   }
 
   const opcoesDiam = diametrosDe(f.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
@@ -194,6 +234,7 @@ export default function PvcCpvcPressao() {
   const editando = editIndex !== null;
 
   return (
+    <ErrorBoundary onReset={novoProjeto}>
     <div className="space-y-5">
       {/* cabeçalho */}
       <div className="flex items-start justify-between gap-3">
@@ -277,7 +318,7 @@ export default function PvcCpvcPressao() {
               value={draft.desce}
               onChange={(v) => setDraftPatch({ desce: v })}
               unit="m"
-              hint={`desnível (sobe − desce) = ${r.desnivel.toFixed(2)} m`}
+              hint={`desnível (desce − sobe) = ${r.desnivel.toFixed(2)} m · subir perde pressão`}
             />
             <NumberField
               label="Incremento pressurizador"
@@ -321,22 +362,24 @@ export default function PvcCpvcPressao() {
           </div>
         </Accordion>
 
-        <Accordion title="Conexões do trecho (comp. equivalente)">
-          <p className="mb-1 text-[11px] leading-relaxed text-amber/80">
-            Subconjunto curado das conexões mais comuns (valores reais da planilha do curso). A
-            tabela completa tem ~32 conexões CPVC / ~17 PVC; aqui estão as principais.
+        <Accordion title={`Conexões do trecho · comp. equivalente (${conexoes.length})`}>
+          <p className="mb-1 text-[11px] leading-relaxed text-zinc-500">
+            Tabela completa de conexões {f.material} da planilha do curso ({conexoes.length} tipos).
+            O valor entre parênteses é o comp. equivalente para a bitola {draft.diametro} mm.
           </p>
-          <div className="grid grid-cols-1 gap-3">
-            {conexoes.map((c) => (
-              <Stepper
-                key={c.id}
-                label={`${c.nome} (${(c.valores[draft.diametro] ?? 0).toFixed(2)} m)`}
-                value={draft.conexoes[c.id] ?? 0}
-                onChange={(v) => setConexao(c.id, v)}
-                min={0}
-                max={40}
-              />
-            ))}
+          <div className="max-h-80 overflow-y-auto rounded-xl border border-ink-700/60 p-2">
+            <div className="grid grid-cols-1 gap-3">
+              {conexoes.map((c) => (
+                <Stepper
+                  key={c.id}
+                  label={`${c.nome} (${(c.valores[draft.diametro] ?? 0).toFixed(2)} m)`}
+                  value={draft.conexoes[c.id] ?? 0}
+                  onChange={(v) => setConexao(c.id, v)}
+                  min={0}
+                  max={40}
+                />
+              ))}
+            </div>
           </div>
           <div className="mt-2 text-[11px] text-zinc-500">
             Comp. equivalente: <span className="font-semibold text-zinc-300">{r.compEquivalente.toFixed(2)} m</span>
@@ -370,13 +413,35 @@ export default function PvcCpvcPressao() {
           </div>
         </Accordion>
 
-        <Accordion title="Nome / ambiente do trecho" defaultOpen>
-          <input
-            value={draft.nome}
-            onChange={(e) => setDraftPatch({ nome: e.target.value })}
-            placeholder="Ex.: Coluna AF → banheiro suíte"
-            className="w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-3 text-base font-semibold text-zinc-100 outline-none focus:border-amber/60"
-          />
+        <Accordion title="Ambiente & trecho" defaultOpen>
+          <p className="mb-2 text-[11px] text-zinc-500">
+            Organização do projeto: <span className="text-zinc-400">projeto › ambiente › trechos</span>.
+            O ambiente se mantém entre inserções pra você lançar vários trechos seguidos.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-zinc-500">
+                Ambiente
+              </label>
+              <input
+                value={draft.ambiente}
+                onChange={(e) => setDraftPatch({ ambiente: e.target.value })}
+                placeholder="Ex.: Banheiro suíte"
+                className="w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-3 text-base font-semibold text-zinc-100 outline-none focus:border-amber/60"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-zinc-500">
+                Trecho
+              </label>
+              <input
+                value={draft.nome}
+                onChange={(e) => setDraftPatch({ nome: e.target.value })}
+                placeholder="Ex.: A → B"
+                className="w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-3 text-base font-semibold text-zinc-100 outline-none focus:border-amber/60"
+              />
+            </div>
+          </div>
         </Accordion>
 
         <Accordion title="Detalhes técnicos (auditar)">
@@ -412,7 +477,10 @@ export default function PvcCpvcPressao() {
       <div className="glass rounded-3xl p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
-            {editando ? `Editando: ${draft.nome}` : "Inserção atual (prévia)"} · {f.material} {draft.diametro} mm
+            {editando
+              ? `Editando: ${[draft.ambiente, draft.nome].filter(Boolean).join(" · ")}`
+              : "Inserção atual (prévia)"}{" "}
+            · {f.material} {draft.diametro} mm
           </span>
           <span
             className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
@@ -526,54 +594,71 @@ export default function PvcCpvcPressao() {
             dimensionar a casa inteira.
           </p>
         ) : (
-          <ol className="space-y-2">
-            {projeto.map((p, i) => {
-              const ok = p.resultado.residualOk;
-              return (
-                <li
-                  key={i}
-                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
-                    i === editIndex ? "border-amber/60 bg-amber/5" : "border-ink-600"
-                  }`}
-                >
-                  <span className="font-display text-xs font-bold text-zinc-500">{i + 1}</span>
-                  <button onClick={() => editar(i)} className="min-w-0 flex-1 text-left">
-                    <div className="truncate text-sm font-medium text-zinc-100">
-                      {p.trecho.nome}
-                      <span className="text-zinc-500">
-                        {" "}· {f.material} {p.trecho.diametro}mm
-                      </span>
-                      {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
-                    </div>
-                    <div className="text-[11px] text-zinc-500">
-                      residual{" "}
-                      <span className={ok ? "font-semibold text-emerald-400" : "font-semibold text-red-400"}>
-                        {p.resultado.pressaoResidual.toFixed(2)} mca
-                      </span>{" "}
-                      · V {p.resultado.velocidade.toFixed(2)} m/s
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => editar(i)}
-                    className="text-xs text-zinc-500 hover:text-amber"
-                  >
-                    editar
-                  </button>
-                  <button
-                    onClick={() => excluirInsercao(i)}
-                    className="text-xs text-zinc-500 hover:text-red-400"
-                  >
-                    excluir
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+          <div className="space-y-4">
+            {grupos.map((g) => (
+              <div key={g.ambiente}>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="font-display text-[11px] font-bold uppercase tracking-wider text-amber/90">
+                    {g.ambiente}
+                  </span>
+                  <span className="text-[10px] text-zinc-600">
+                    {g.itens.length} trecho{g.itens.length > 1 ? "s" : ""}
+                  </span>
+                  <div className="h-px flex-1 bg-ink-700" />
+                </div>
+                <ol className="space-y-2">
+                  {g.itens.map(({ p, i }) => {
+                    const ok = p.resultado.residualOk;
+                    return (
+                      <li
+                        key={i}
+                        className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
+                          i === editIndex ? "border-amber/60 bg-amber/5" : "border-ink-600"
+                        }`}
+                      >
+                        <span className="font-display text-xs font-bold text-zinc-500">{i + 1}</span>
+                        <button onClick={() => editar(i)} className="min-w-0 flex-1 text-left">
+                          <div className="truncate text-sm font-medium text-zinc-100">
+                            {p.trecho.nome || "Trecho"}
+                            <span className="text-zinc-500">
+                              {" "}· {f.material} {p.trecho.diametro}mm
+                            </span>
+                            {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
+                          </div>
+                          <div className="text-[11px] text-zinc-500">
+                            residual{" "}
+                            <span className={ok ? "font-semibold text-emerald-400" : "font-semibold text-red-400"}>
+                              {p.resultado.pressaoResidual.toFixed(2)} mca
+                            </span>{" "}
+                            · V {p.resultado.velocidade.toFixed(2)} m/s
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => editar(i)}
+                          className="text-xs text-zinc-500 hover:text-amber"
+                        >
+                          editar
+                        </button>
+                        <button
+                          onClick={() => excluirInsercao(i)}
+                          className="text-xs text-zinc-500 hover:text-red-400"
+                        >
+                          excluir
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            ))}
+          </div>
         )}
         <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          A pressão residual de cada inserção vira a entrada da próxima automaticamente. Verde =
-          atende o mínimo da peça; vermelho = insuficiente ou negativa. Toque numa inserção para
-          editar.
+          A pressão residual de cada inserção vira a entrada da próxima automaticamente. A
+          numeração (#) é a <span className="text-zinc-400">ordem de inserção</span> — é ela que
+          define a sequência hidráulica, mesmo que os trechos estejam agrupados por ambiente.
+          Verde = atende o mínimo da peça; vermelho = insuficiente ou negativa. Toque numa
+          inserção para editar.
         </p>
       </div>
 
@@ -680,6 +765,7 @@ export default function PvcCpvcPressao() {
         </div>
       </div>
     </div>
+    </ErrorBoundary>
   );
 }
 
