@@ -100,6 +100,25 @@ export interface Inputs {
   producaoColetor: number; // B39 — produção INMETRO do coletor escolhido
   clima: Clima; // B40
   orientacao: Orientacao; // B45
+  // Volume de boiler ESCOLHIDO pelo projetista (L). Na vida real o boiler vem em
+  // tamanhos comerciais fechados (600, 800, 1000...), então o usuário ARBITRA o
+  // tamanho que vai usar. 0/vazio = usa o volume calculado (B33). É ESTE volume
+  // (escolhido, quando houver) que alimenta a energia útil → nº de coletores.
+  volumeBoilerEscolhido: number;
+}
+
+// Tamanhos comerciais de boiler (L) — referência de mercado para os atalhos da UI
+// e para sugerir o próximo tamanho acima do volume calculado.
+export const TAMANHOS_BOILER_COMERCIAIS = [
+  100, 150, 200, 300, 400, 500, 600, 800, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
+];
+
+// Menor tamanho comercial >= volume calculado (sugestão de compra). Acima do maior
+// tamanho da lista, devolve o próprio volume arredondado pra cima em 500 L.
+export function sugerirTamanhoBoiler(volCalculado: number): number {
+  if (!isFinite(volCalculado) || volCalculado <= 0) return 0;
+  const acima = TAMANHOS_BOILER_COMERCIAIS.find((t) => t >= volCalculado);
+  return acima ?? Math.ceil(volCalculado / 500) * 500;
 }
 
 // ----------------------------- saída -----------------------------
@@ -116,7 +135,10 @@ export interface Resultado {
   itens: ItemResultado[];
   consumoTotal: number; // B30 (L/dia)
   consumoAQ: number; // B31 (L/dia)
-  volBoilerQuente: number; // B33 (L) — número-herói
+  volBoilerQuente: number; // B33 (L) — VALOR CALCULADO (referência)
+  volBoilerUsado: number; // L — volume que ALIMENTA o cálculo das placas (escolhido ou calculado)
+  usouEscolhido: boolean; // true se o projetista arbitrou um tamanho comercial
+  volBoilerSugerido: number; // menor tamanho comercial >= calculado (sugestão de compra)
   volFria: number; // B34 (L)
   pctMisturaAQ: number; // (Tc - Tf) / (Tq - Tf) * 100
   pctAQ: number; // % do consumo total que é água quente
@@ -201,8 +223,14 @@ export function calcular(i: Inputs): Resultado {
   const pctAQ = consumoTotal > 0 ? (volBoilerQuente / consumoTotal) * 100 : 0;
   const pctAF = consumoTotal > 0 ? (volFria / consumoTotal) * 100 : 0;
 
-  // A37 — energia útil
-  const energiaUtil = safeDiv(volBoilerQuente * (i.tQuente - i.tFria), CONST_ENERGIA_UTIL);
+  // Volume que de fato alimenta o dimensionamento das placas: o ESCOLHIDO pelo
+  // projetista (tamanho comercial) quando informado; senão, o calculado (B33).
+  const usouEscolhido = !!(i.volumeBoilerEscolhido && i.volumeBoilerEscolhido > 0);
+  const volBoilerUsado = usouEscolhido ? i.volumeBoilerEscolhido : volBoilerQuente;
+  const volBoilerSugerido = sugerirTamanhoBoiler(volBoilerQuente);
+
+  // A37 — energia útil (usa o volume escolhido/usado, não o calculado cru)
+  const energiaUtil = safeDiv(volBoilerUsado * (i.tQuente - i.tFria), CONST_ENERGIA_UTIL);
 
   // A43 — nº de coletores (bruto, corrigido por clima)
   const fatorClima = FATOR_CLIMA[i.clima];
@@ -219,6 +247,9 @@ export function calcular(i: Inputs): Resultado {
     consumoTotal,
     consumoAQ,
     volBoilerQuente,
+    volBoilerUsado,
+    usouEscolhido,
+    volBoilerSugerido,
     volFria,
     pctMisturaAQ,
     pctAQ,

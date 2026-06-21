@@ -13,6 +13,7 @@ import {
   CLIMA_LABEL,
   ORIENTACAO_LABEL,
   CONST_ENERGIA_UTIL,
+  TAMANHOS_BOILER_COMERCIAIS,
   pontosPadrao,
   eletrosPadrao,
 } from "@/lib/calc/caixa-boiler-solar";
@@ -45,6 +46,7 @@ interface Form {
   modeloColetor: string;
   clima: Clima;
   orientacao: Orientacao;
+  volumeBoilerEscolhido: number; // 0 = usar o volume calculado
 }
 
 const PADRAO: Form = {
@@ -59,6 +61,7 @@ const PADRAO: Form = {
   modeloColetor: "",
   clima: "quente",
   orientacao: "45-norte",
+  volumeBoilerEscolhido: 0,
 };
 
 // cor da etiqueta PBE (A..E)
@@ -81,6 +84,7 @@ function toInputs(f: Form): Inputs {
     producaoColetor: f.producaoColetor,
     clima: f.clima,
     orientacao: f.orientacao,
+    volumeBoilerEscolhido: f.volumeBoilerEscolhido,
   };
 }
 
@@ -161,10 +165,14 @@ export default function CaixaBoilerSolar() {
   }
 
   function carregar(p: Projeto) {
-    setF(p.inputs as Form);
+    // mescla com PADRAO p/ projetos salvos antes de campos novos (ex.: volumeBoilerEscolhido)
+    const merged = { ...PADRAO, ...(p.inputs as Partial<Form>) };
+    setF(merged);
     setProjetoId(p.id);
     setNome(p.nome);
-    snapshot.current = JSON.stringify(p.inputs);
+    // snapshot da forma MESCLADA (não dos inputs crus): senão um projeto antigo, sem o
+    // campo novo, divergiria do estado e marcaria "não-salvo" sem o usuário mexer.
+    snapshot.current = JSON.stringify(merged);
     setSalvoEm(p.atualizadoEm);
     setEstado("salvo");
   }
@@ -180,6 +188,14 @@ export default function CaixaBoilerSolar() {
 
   // --- cálculo ao vivo ---
   const r = useMemo(() => calcular(toInputs(f)), [f]);
+
+  // atalhos de tamanho comercial de boiler em volta da sugestão (≈6 chips)
+  const chipsBoiler = useMemo(() => {
+    const idx = TAMANHOS_BOILER_COMERCIAIS.findIndex((t) => t === r.volBoilerSugerido);
+    return idx >= 0
+      ? TAMANHOS_BOILER_COMERCIAIS.slice(Math.max(0, idx - 1), idx + 5)
+      : TAMANHOS_BOILER_COMERCIAIS.slice(6, 12);
+  }, [r.volBoilerSugerido]);
 
   return (
     <div className="space-y-5">
@@ -410,15 +426,78 @@ export default function CaixaBoilerSolar() {
       {/* RESULT HERO */}
       <div className="glass rounded-3xl p-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Hero
-            titulo="Boiler · água quente"
-            valor={`${fmt(r.volBoilerQuente, 0)} L`}
-            sub={`exato: ${fmt(r.volBoilerQuente, 1)} L`}
-          />
+          {/* BOILER: valor calculado + volume escolhido (arbitrado pelo projetista) */}
+          <div className="rounded-2xl bg-ink-900/50 p-4">
+            <div className="text-[11px] uppercase tracking-wider text-zinc-500">Boiler · água quente</div>
+            <div className="mt-0.5 font-display text-3xl font-bold text-amber">
+              {fmt(r.volBoilerUsado, 0)} <span className="text-xl">L</span>
+            </div>
+            <div className="mt-0.5 text-[11px] text-zinc-500">
+              {r.usouEscolhido ? (
+                <>
+                  volume escolhido · calculado{" "}
+                  <span className="text-zinc-400">{fmt(r.volBoilerQuente, 0)} L</span>
+                </>
+              ) : (
+                <>valor calculado (exato {fmt(r.volBoilerQuente, 1)} L)</>
+              )}
+            </div>
+
+            {/* campo: o projetista arbitra o tamanho comercial que vai usar */}
+            <div className="mt-3">
+              <NumberField
+                label="Volume escolhido (boiler comercial)"
+                value={f.volumeBoilerEscolhido}
+                onChange={(v) => set("volumeBoilerEscolhido", v)}
+                unit="L"
+                hint={`0 = usar o calculado · na vida real são tamanhos fechados (600, 800, 1000…). Sugestão: ${fmt(
+                  r.volBoilerSugerido,
+                  0,
+                )} L`}
+              />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => set("volumeBoilerEscolhido", 0)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                    !r.usouEscolhido
+                      ? "bg-amber/15 text-amber"
+                      : "border border-ink-600 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  calculado
+                </button>
+                {chipsBoiler.map((t) => {
+                  const ativo = f.volumeBoilerEscolhido === t;
+                  const sugerido = t === r.volBoilerSugerido;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => set("volumeBoilerEscolhido", t)}
+                      className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                        ativo
+                          ? "bg-amber/15 text-amber"
+                          : `border border-ink-600 hover:text-zinc-200 ${
+                              sugerido ? "text-amber/80" : "text-zinc-400"
+                            }`
+                      }`}
+                    >
+                      {fmt(t, 0)}
+                      {sugerido && !ativo ? " ★" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
           <Hero
             titulo="Comprar coletores"
             valor={`${r.nColetoresCorrigido}`}
-            sub={`exato: ${fmt(r.nCorrigidoExato, 2)} · ${fmt(f.producaoColetor, 1)} kWh/mês cada`}
+            sub={`exato: ${fmt(r.nCorrigidoExato, 2)} · puxa do volume ${
+              r.usouEscolhido ? "escolhido" : "calculado"
+            } (${fmt(r.volBoilerUsado, 0)} L)`}
           />
         </div>
 
@@ -454,9 +533,13 @@ export default function CaixaBoilerSolar() {
           </tbody>
         </table>
         <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          ROUNDUP em cada etapa (sempre arredonda pra cima). Energia útil = volume quente × ΔT ÷{" "}
-          {fmt(CONST_ENERGIA_UTIL, 1)} (constante da planilha do curso). Mostramos também o valor exato
-          antes do arredondamento.
+          ROUNDUP em cada etapa (sempre arredonda pra cima). Energia útil ={" "}
+          <span className="text-zinc-400">
+            volume {r.usouEscolhido ? "escolhido" : "calculado"} ({fmt(r.volBoilerUsado, 0)} L)
+          </span>{" "}
+          × ΔT ÷ {fmt(CONST_ENERGIA_UTIL, 1)} (constante da planilha do curso). É o volume do boiler
+          que dimensiona as placas — por isso o tamanho escolhido muda o nº de coletores. Mostramos
+          também o valor exato antes do arredondamento.
         </p>
       </div>
 
@@ -465,7 +548,11 @@ export default function CaixaBoilerSolar() {
         <div className="grid grid-cols-2 gap-3 text-sm text-zinc-300">
           <Det l="Consumo AF e AQ" v={`${fmt(r.consumoAQ, 0)} L`} />
           <Det l="% mistura (água quente)" v={`${fmt(r.pctMisturaAQ, 1)} %`} />
-          <Det l="Vol. boiler (exato)" v={`${fmt(r.volBoilerQuente, 2)} L`} />
+          <Det l="Vol. boiler calculado (exato)" v={`${fmt(r.volBoilerQuente, 2)} L`} />
+          <Det
+            l="Vol. usado no cálculo das placas"
+            v={`${fmt(r.volBoilerUsado, 0)} L${r.usouEscolhido ? " (escolhido)" : " (calculado)"}`}
+          />
           <Det l="Vol. fria (exato)" v={`${fmt(r.volFria, 2)} L`} />
           <Det l="Energia útil (exato)" v={`${fmt(r.energiaUtil, 2)} kWh`} />
           <Det l="Constante energia" v={fmt(CONST_ENERGIA_UTIL, 1)} />
