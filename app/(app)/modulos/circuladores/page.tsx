@@ -645,14 +645,14 @@ export default function RecirculacaoConsumo() {
         />
 
         {FOTOS[f.bombaSelecionada] && (
-          <div className="mt-3 flex flex-col items-center rounded-2xl border border-ink-600 bg-white/95 p-3">
+          <div className="mt-3 flex flex-col items-center p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={FOTOS[f.bombaSelecionada].src}
               alt={`Foto da bomba ${f.bombaSelecionada}`}
               className="h-44 w-auto object-contain"
             />
-            <span className="mt-1 text-[11px] font-medium text-zinc-600">{f.bombaSelecionada}</span>
+            <span className="mt-1 text-[11px] font-medium text-zinc-400">{f.bombaSelecionada}</span>
           </div>
         )}
 
