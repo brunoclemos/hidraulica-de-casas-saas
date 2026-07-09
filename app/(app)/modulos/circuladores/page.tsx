@@ -24,8 +24,26 @@ import {
   tempoRelativo,
   Projeto,
 } from "@/lib/projetos";
+import fotoTbhweSs from "./fotos/tbhwe-ss-100w.png";
+import fotoTbhweIp from "./fotos/tbhwe-ip-br-120w.png";
+import fotoTbhux from "./fotos/tbhux-rn.png";
+import fotoWsBr from "./fotos/ws-br.png";
+import fotoTbhli from "./fotos/tbhli.png";
 
 const MODULO = "circuladores";
+
+// Foto por bomba (variações do mesmo modelo físico compartilham a foto — igual à planilha).
+const FOTOS: Record<string, { src: string }> = {
+  "TBHWE-SS 100W · Velocidade 1": fotoTbhweSs,
+  "TBHWE-SS 100W · Velocidade 2": fotoTbhweSs,
+  "TBHWE-SS 100W · Velocidade 3": fotoTbhweSs,
+  "TBHWE-IP-BR 120W": fotoTbhweIp,
+  "TBHUX-RN 3/4CV 220V": fotoTbhux,
+  "WS-BR 1/2CV": fotoWsBr,
+  "WS-BR 1/4CV": fotoWsBr,
+  "TBHLI 1,0CV": fotoTbhli,
+  "TBHLI-70 1/2CV": fotoTbhli,
+};
 
 // Estado serializável do formulário = Inputs + bomba selecionada.
 interface Form extends Inputs {
@@ -543,6 +561,18 @@ export default function RecirculacaoConsumo() {
           onChange={(v) => set("bombaSelecionada", String(v))}
           options={BOMBAS.map((b) => ({ value: b.nome, label: b.nome }))}
         />
+
+        {FOTOS[f.bombaSelecionada] && (
+          <div className="mt-3 flex flex-col items-center rounded-2xl border border-ink-600 bg-white/95 p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={FOTOS[f.bombaSelecionada].src}
+              alt={`Foto da bomba ${f.bombaSelecionada}`}
+              className="h-44 w-auto object-contain"
+            />
+            <span className="mt-1 text-[11px] font-medium text-zinc-600">{f.bombaSelecionada}</span>
+          </div>
+        )}
 
         {bombaSelRes && (
           <div className="mt-3 grid grid-cols-3 gap-2">
