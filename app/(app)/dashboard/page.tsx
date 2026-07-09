@@ -34,6 +34,12 @@ const MODULOS = [
     desc: "Volume do vaso por NBR 16057 e Caleffi, lado a lado.",
     ativo: true,
   },
+  {
+    slug: "circuladores",
+    nome: "Cálculo de Circuladores",
+    desc: "Perda de carga trecho a trecho, curva do sistema e seleção do circulador de recirculação.",
+    ativo: true,
+  },
 ];
 
 export default function Dashboard() {

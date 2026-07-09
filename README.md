@@ -5,8 +5,16 @@ em uma ferramenta web única, com a identidade da marca, login de aluno e histó
 
 ## Status
 
-Protótipo de referência com o **1º módulo completo**: `Tempo de Recirculação & Perda Térmica`.
-Os demais módulos aparecem no dashboard como "em breve".
+Protótipo de referência com **6 módulos completos**:
+
+1. `Tempo de Recirculação & Perda Térmica`
+2. `Perfil Térmico do Boiler`
+3. `Caixa d'Água, Boiler & Solar`
+4. `PVC/CPVC, Bombas & Pressão`
+5. `Vaso de Expansão`
+6. `Cálculo de Circuladores` — caminho crítico trecho a trecho, curva do sistema
+   (regressão quadrática) e seleção do circulador (banco Texius). Motor portado da
+   planilha "Dimensionamento Recirculação para consumo" e validado célula a célula.
 
 ## Stack
 
