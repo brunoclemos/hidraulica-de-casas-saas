@@ -426,13 +426,9 @@ export default function RecirculacaoConsumo() {
 
       {/* CURVA DO SISTEMA */}
       <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-1 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
           Curva do sistema × circulador
         </h3>
-        <p className="mb-3 text-[12px] text-zinc-500">
-          Vazões de teste no tronco (Trecho 1). A curva H = a + b·Q + c·Q² é ajustada por regressão
-          quadrática nesses pontos.
-        </p>
 
         {/* Arbitrar a vazão pela velocidade-alvo no Trecho 1 */}
         <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-amber/25 bg-amber/5 p-3">
