@@ -7,9 +7,13 @@ import {
   amostraCurvas,
   detalheEmVazao,
   vazaoParaVelocidade,
+  dividirVazao,
+  volumeTotal,
+  vazaoParaTempo,
   dnInterno,
   Inputs,
   Trecho,
+  Anel,
   DN_CPVC,
   CONEXOES,
   AQUECEDORES,
@@ -50,7 +54,7 @@ interface Form extends Inputs {
   bombaSelecionada: string;
 }
 
-function trechoPadrao(nome: string, dnExterno: number, vazao: number): Trecho {
+function trechoPadrao(nome: string, dnExterno: number, vazao: number, anel: Anel = "tronco"): Trecho {
   return {
     nome,
     dnExterno,
@@ -64,6 +68,7 @@ function trechoPadrao(nome: string, dnExterno: number, vazao: number): Trecho {
     kvValvula: 0,
     aquecedorModelo: "",
     aquecedorQtd: 0,
+    anel,
   };
 }
 
@@ -73,18 +78,29 @@ const PADRAO: Form = {
   bombaSelecionada: BOMBAS[2].nome, // TBHWE-SS 100W Velocidade 3
   trechos: [
     {
-      ...trechoPadrao("Tronco", 22, 6),
+      ...trechoPadrao("Tronco", 22, 6, "tronco"),
       comprimentoReal: 2,
       conexoes: { "Curva 90°": 1, "Tê passagem direta e saída lateral": 1, "Registro de gaveta aberto": 1 },
     },
     {
-      ...trechoPadrao("Anel de recirculação", 22, 3.4),
+      ...trechoPadrao("Anel 1", 22, 3.4, "1"),
       comprimentoReal: 15,
       conexoes: { "Joelho 90°": 6 },
+    },
+    {
+      ...trechoPadrao("Anel 2", 22, 2.6, "2"),
+      comprimentoReal: 11,
+      conexoes: { "Joelho 90°": 4 },
     },
   ],
   cenarios: [3, 6, 18, 22],
 };
+
+const opcoesAnel: { value: Anel; label: string }[] = [
+  { value: "tronco", label: "Tronco" },
+  { value: "1", label: "Anel 1" },
+  { value: "2", label: "Anel 2" },
+];
 
 const opcoesDN = DN_CPVC.map((d) => ({ value: d.externo, label: d.rotulo }));
 const opcoesAquecedor = [
@@ -131,6 +147,9 @@ export default function RecirculacaoConsumo() {
 
   // velocidade-alvo (helper transitório p/ arbitrar a vazão pela velocidade no Trecho 1)
   const [velAlvo, setVelAlvo] = useState(2.5);
+  // divisão de vazão entre anéis (total do tronco) e recirculação por tempo
+  const [vazaoTroncoDiv, setVazaoTroncoDiv] = useState(6);
+  const [tempoRecirc, setTempoRecirc] = useState(1);
 
   // ---- estado de salvamento ("Meus Projetos") ----
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -198,6 +217,11 @@ export default function RecirculacaoConsumo() {
   const dnIntTronco = dnInterno(f.trechos[0]?.dnExterno ?? 0);
   const vazaoEquivVel = vazaoParaVelocidade(velAlvo, dnIntTronco);
 
+  // divisão de vazão entre anéis + recirculação estimada
+  const divisao = useMemo(() => dividirVazao(f, vazaoTroncoDiv), [f, vazaoTroncoDiv]);
+  const volume = useMemo(() => volumeTotal(f), [f]);
+  const vazaoRecirc = useMemo(() => vazaoParaTempo(f, tempoRecirc), [f, tempoRecirc]);
+
   // colunas do detalhamento por trecho: 1 por cenário + ponto de operação (oficial)
   const qOp = bombaSelRes?.qOp ?? null;
   const colunasDetalhe = useMemo(() => {
@@ -264,7 +288,7 @@ export default function RecirculacaoConsumo() {
           const lEquiv = tr.comprimentoEquiv;
           const conexoesAtivas = Object.entries(t.conexoes).filter(([, q]) => q > 0);
           return (
-            <div key={idx} className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+            <div key={idx} className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <input
                   value={t.nome}
@@ -282,6 +306,12 @@ export default function RecirculacaoConsumo() {
               </div>
 
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <SelectField
+                  label="Anel"
+                  value={t.anel ?? "tronco"}
+                  onChange={(v) => patchTrecho(idx, { anel: v as Anel })}
+                  options={opcoesAnel}
+                />
                 <SelectField
                   label="DN"
                   value={t.dnExterno}
@@ -317,8 +347,8 @@ export default function RecirculacaoConsumo() {
                   unit="mca"
                   step={0.1}
                 />
-                <div className="flex flex-col justify-center rounded-xl bg-ink-900/40 px-3 py-2">
-                  <span className="text-[10px] uppercase tracking-wider text-zinc-500">Comp. equiv.</span>
+                <div className="flex flex-col justify-center rounded-xl bg-ink-700 px-3 py-2">
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-400">Comp. equiv.</span>
                   <span className="text-sm font-semibold text-zinc-200">{num(lEquiv)} m</span>
                 </div>
               </div>
@@ -412,6 +442,62 @@ export default function RecirculacaoConsumo() {
         </button>
       </div>
 
+      {/* DIVISÃO DE VAZÃO ENTRE ANÉIS */}
+      <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
+        <h3 className="mb-1 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+          Divisão de vazão entre anéis
+        </h3>
+        <p className="mb-3 text-[12px] text-zinc-500">
+          Informe o total do tronco. A ferramenta divide entre os anéis igualando a perda de carga
+          (marque cada trecho como Anel 1 ou Anel 2 acima).
+        </p>
+        <div className="max-w-[200px]">
+          <NumberField
+            label="Vazão total do tronco"
+            value={vazaoTroncoDiv}
+            onChange={setVazaoTroncoDiv}
+            unit="L/min"
+            step={0.1}
+          />
+        </div>
+        {divisao ? (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Hero titulo="Anel 1" valor={`${num(divisao.q1, 2)} L/min`} />
+            <Hero titulo="Anel 2" valor={`${num(divisao.q2, 2)} L/min`} />
+            <div className="col-span-2 rounded-lg bg-ink-700 px-3 py-2 text-[11px] text-zinc-400">
+              Perda de carga equilibrada nos dois anéis: {num(divisao.perda1, 3)} mca.
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 rounded-lg bg-ink-700 px-3 py-2 text-[12px] text-zinc-400">
+            Marque ao menos um trecho como <b>Anel 1</b> e outro como <b>Anel 2</b> para calcular a divisão.
+          </p>
+        )}
+      </div>
+
+      {/* RECIRCULAÇÃO (ESTIMATIVA) */}
+      <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
+        <h3 className="mb-1 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+          Recirculação (estimativa)
+        </h3>
+        <p className="mb-3 text-[12px] text-zinc-500">
+          Vazão necessária para trocar todo o volume das tubulações no tempo desejado.
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="w-40">
+            <NumberField
+              label="Recircular em"
+              value={tempoRecirc}
+              onChange={setTempoRecirc}
+              unit="min"
+              step={0.5}
+            />
+          </div>
+          <Hero titulo="Vazão total necessária" valor={`${num(vazaoRecirc, 2)} L/min`} />
+          <Hero titulo="Volume das tubulações" valor={`${num(volume, 2)} L`} />
+        </div>
+      </div>
+
       {/* RESUMO DO CAMINHO CRÍTICO */}
       <div className="rounded-2xl border border-amber/30 bg-ink-800 p-4">
         <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
@@ -425,7 +511,7 @@ export default function RecirculacaoConsumo() {
       </div>
 
       {/* CURVA DO SISTEMA */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+      <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
         <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
           Curva do sistema × circulador
         </h3>
@@ -479,8 +565,8 @@ export default function RecirculacaoConsumo() {
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {r.pontosSistema.map(([q, h], i) => (
-              <div key={i} className="rounded-xl bg-ink-900/50 p-3 text-center">
-                <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+              <div key={i} className="rounded-xl bg-ink-700 p-3 text-center">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-400">
                   Cenário {i + 1}
                 </div>
                 <div className="font-display text-base font-bold text-zinc-100">{num(q, 1)} L/min</div>
@@ -517,10 +603,10 @@ export default function RecirculacaoConsumo() {
                   </tr>
                 </thead>
                 <tbody>
-                  {f.trechos.map((t, ti) => (
+                  {(colunasDetalhe[0]?.linhas ?? []).map((linha0, ti) => (
                     <tr key={ti} className="border-t border-ink-700">
                       <td className="sticky left-0 bg-ink-800 px-2 py-1 text-left text-zinc-300">
-                        {t.nome || `Trecho ${ti + 1}`}
+                        {linha0.nome || `Trecho ${ti + 1}`}
                       </td>
                       {colunasDetalhe.map((col, ci) => {
                         const d = col.linhas[ti];
@@ -546,7 +632,7 @@ export default function RecirculacaoConsumo() {
       </div>
 
       {/* SELEÇÃO DE BOMBA */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+      <div className="rounded-2xl border border-ink-600 bg-ink-700 p-4">
         <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
           Ponto de operação × bombas
         </h3>
@@ -572,10 +658,10 @@ export default function RecirculacaoConsumo() {
 
         {bombaSelRes && (
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <Hero titulo="Vazão de operação" valor={bombaSelRes.qOp !== null ? `${num(bombaSelRes.qOp, 1)} L/min` : "—"} />
-            <Hero titulo="Pressão de operação" valor={bombaSelRes.hOp !== null ? `${num(bombaSelRes.hOp)} mca` : "—"} />
-            <div className="flex flex-col justify-center rounded-2xl bg-ink-900/50 p-3">
-              <div className="text-[11px] uppercase tracking-wider text-zinc-500">Faixa útil</div>
+            <Hero tone="light" titulo="Vazão de operação" valor={bombaSelRes.qOp !== null ? `${num(bombaSelRes.qOp, 1)} L/min` : "—"} />
+            <Hero tone="light" titulo="Pressão de operação" valor={bombaSelRes.hOp !== null ? `${num(bombaSelRes.hOp)} mca` : "—"} />
+            <div className="flex flex-col justify-center rounded-2xl bg-ink-600 p-3">
+              <div className="text-[11px] uppercase tracking-wider text-zinc-400">Faixa útil</div>
               <div className={`mt-0.5 font-display text-sm font-bold ${bombaSelRes.atende ? "text-emerald-400" : "text-red-400"}`}>
                 {bombaSelRes.atende ? "Dentro" : "Fora"}
               </div>
@@ -597,7 +683,7 @@ export default function RecirculacaoConsumo() {
               {r.bombas.map((b) => (
                 <tr
                   key={b.nome}
-                  className={`border-t border-ink-700 ${b.nome === f.bombaSelecionada ? "bg-amber/5" : ""}`}
+                  className={`border-t border-ink-500 ${b.nome === f.bombaSelecionada ? "bg-amber/10" : ""}`}
                 >
                   <td className="py-2 pr-2 text-zinc-300">{b.nome}</td>
                   <td className="py-2 text-right text-zinc-300">
@@ -621,7 +707,7 @@ export default function RecirculacaoConsumo() {
       </div>
 
       {/* MEUS PROJETOS */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+      <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
         <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
           Meus projetos
         </h3>
@@ -810,20 +896,22 @@ function QHChart({
 // Componentes de resultado
 // ---------------------------------------------------------------------------
 
-function Hero({ titulo, valor }: { titulo: string; valor: string }) {
+function Hero({ titulo, valor, tone = "grey" }: { titulo: string; valor: string; tone?: "grey" | "light" }) {
+  // tom cinza que "salta" do card; "light" (mais claro) para uso dentro da seção da bomba
+  const bg = tone === "light" ? "bg-ink-600" : "bg-ink-700";
   return (
-    <div className="rounded-2xl bg-ink-900/50 p-3">
-      <div className="text-[11px] uppercase tracking-wider text-zinc-500">{titulo}</div>
+    <div className={`rounded-2xl ${bg} p-3`}>
+      <div className="text-[11px] uppercase tracking-wider text-zinc-400">{titulo}</div>
       <div className="mt-0.5 font-display text-lg font-bold text-amber">{valor}</div>
     </div>
   );
 }
 
 function Mini({ l, v, destaque }: { l: string; v: string; destaque?: "ok" | "erro" }) {
-  const cor = destaque === "erro" ? "text-red-400" : destaque === "ok" ? "text-emerald-400" : "text-zinc-200";
+  const cor = destaque === "erro" ? "text-red-400" : destaque === "ok" ? "text-emerald-400" : "text-zinc-100";
   return (
-    <div className="rounded-lg bg-ink-900/40 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{l}</div>
+    <div className="rounded-lg bg-ink-700 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-400">{l}</div>
       <div className={`font-semibold ${cor}`}>{v}</div>
     </div>
   );
