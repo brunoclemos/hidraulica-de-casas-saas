@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   calcular,
   amostraCurvas,
+  detalheEmVazao,
+  vazaoParaVelocidade,
+  dnInterno,
   Inputs,
   Trecho,
   DN_CPVC,
@@ -62,6 +65,7 @@ const PADRAO: Form = {
       conexoes: { "Joelho 90°": 6 },
     },
   ],
+  cenarios: [3, 6, 18, 22],
 };
 
 const opcoesDN = DN_CPVC.map((d) => ({ value: d.externo, label: d.rotulo }));
@@ -103,6 +107,12 @@ export default function RecirculacaoConsumo() {
 
   const removeTrecho = (idx: number) =>
     setF((p) => ({ ...p, trechos: p.trechos.filter((_, i) => i !== idx) }));
+
+  const setCenario = (idx: number, v: number) =>
+    setF((p) => ({ ...p, cenarios: p.cenarios.map((c, i) => (i === idx ? v : c)) }));
+
+  // velocidade-alvo (helper transitório p/ arbitrar a vazão pela velocidade no Trecho 1)
+  const [velAlvo, setVelAlvo] = useState(2.5);
 
   // ---- estado de salvamento ("Meus Projetos") ----
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -165,6 +175,22 @@ export default function RecirculacaoConsumo() {
     () => amostraCurvas(r.sistema, bombaSel, r.qMaxSistema, bombaSelRes?.qOp ?? null),
     [r.sistema, bombaSel, r.qMaxSistema, bombaSelRes]
   );
+
+  // vazão equivalente à velocidade-alvo no Trecho 1 (para arbitrar a vazão pela velocidade)
+  const dnIntTronco = dnInterno(f.trechos[0]?.dnExterno ?? 0);
+  const vazaoEquivVel = vazaoParaVelocidade(velAlvo, dnIntTronco);
+
+  // colunas do detalhamento por trecho: 1 por cenário + ponto de operação (oficial)
+  const qOp = bombaSelRes?.qOp ?? null;
+  const colunasDetalhe = useMemo(() => {
+    const cols = f.cenarios
+      .filter((q) => Number.isFinite(q) && q > 0)
+      .map((q, i) => ({ titulo: `Cenário ${i + 1}`, q, linhas: detalheEmVazao(f, q) }));
+    if (qOp !== null) {
+      cols.push({ titulo: "Ponto de operação", q: qOp, linhas: detalheEmVazao(f, qOp) });
+    }
+    return cols;
+  }, [f, qOp]);
 
   return (
     <div className="space-y-5">
@@ -386,8 +412,42 @@ export default function RecirculacaoConsumo() {
           Curva do sistema × circulador
         </h3>
         <p className="mb-3 text-[12px] text-zinc-500">
-          Perda de carga do circuito em função da vazão, em torno da vazão de projeto do tronco.
+          Vazões de teste no tronco (Trecho 1). A curva H = a + b·Q + c·Q² é ajustada por regressão
+          quadrática nesses pontos.
         </p>
+
+        {/* Arbitrar a vazão pela velocidade-alvo no Trecho 1 */}
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-amber/25 bg-amber/5 p-3">
+          <div className="w-32">
+            <NumberField
+              label="Velocidade-alvo (Trecho 1)"
+              value={velAlvo}
+              onChange={setVelAlvo}
+              unit="m/s"
+              step={0.1}
+            />
+          </div>
+          <div className="flex-1">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500">Vazão equivalente</div>
+            <div className="font-display text-lg font-bold text-amber">{num(vazaoEquivVel, 1)} L/min</div>
+            <div className="text-[11px] text-zinc-500">
+              Copie esse valor num cenário abaixo para testar o limite de velocidade.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-4 gap-2">
+          {f.cenarios.map((c, i) => (
+            <NumberField
+              key={i}
+              label={`Cenário ${i + 1}`}
+              value={c}
+              onChange={(v) => setCenario(i, v)}
+              unit="L/min"
+              step={0.5}
+            />
+          ))}
+        </div>
 
         <QHChart
           pontos={curvas}
@@ -397,6 +457,78 @@ export default function RecirculacaoConsumo() {
           qMax={r.qMaxSistema}
           nomeBomba={bombaSel.nome}
         />
+
+        {/* RESUMO — vazão x perda de carga por cenário */}
+        <div className="mt-4">
+          <div className="mb-2 text-[11px] uppercase tracking-wider text-zinc-500">
+            Perda de carga por cenário (para comparar com a curva da bomba)
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {r.pontosSistema.map(([q, h], i) => (
+              <div key={i} className="rounded-xl bg-ink-900/50 p-3 text-center">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Cenário {i + 1}
+                </div>
+                <div className="font-display text-base font-bold text-zinc-100">{num(q, 1)} L/min</div>
+                <div className="font-display text-lg font-bold text-amber">{num(h, 3)} mca</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* DETALHAMENTO por trecho e cenário (validação) */}
+        <div className="mt-3">
+          <Accordion title="Detalhamento por trecho e cenário (validação)">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] border-collapse text-right text-[11px]">
+                <thead>
+                  <tr className="text-zinc-400">
+                    <th className="sticky left-0 bg-ink-800 px-2 py-1 text-left font-semibold">Trecho</th>
+                    {colunasDetalhe.map((col, i) => (
+                      <th key={i} colSpan={3} className="border-l border-ink-700 px-2 py-1 text-center font-semibold">
+                        {col.titulo}
+                        <div className="text-[10px] font-normal text-zinc-500">{num(col.q, 2)} L/min</div>
+                      </th>
+                    ))}
+                  </tr>
+                  <tr className="text-zinc-500">
+                    <th className="sticky left-0 bg-ink-800 px-2 py-1"></th>
+                    {colunasDetalhe.map((_, i) => (
+                      <Fragment key={i}>
+                        <th className="border-l border-ink-700 px-2 py-1 font-medium">Q</th>
+                        <th className="px-2 py-1 font-medium">V</th>
+                        <th className="px-2 py-1 font-medium">h_f</th>
+                      </Fragment>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {f.trechos.map((t, ti) => (
+                    <tr key={ti} className="border-t border-ink-700">
+                      <td className="sticky left-0 bg-ink-800 px-2 py-1 text-left text-zinc-300">
+                        {t.nome || `Trecho ${ti + 1}`}
+                      </td>
+                      {colunasDetalhe.map((col, ci) => {
+                        const d = col.linhas[ti];
+                        return (
+                          <Fragment key={ci}>
+                            <td className="border-l border-ink-700 px-2 py-1 text-zinc-300">{num(d?.q ?? 0, 2)}</td>
+                            <td className="px-2 py-1 text-zinc-300">{num(d?.v ?? 0, 3)}</td>
+                            <td className="px-2 py-1 text-zinc-300">{num(d?.hf ?? 0, 3)}</td>
+                          </Fragment>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-[11px] text-zinc-500">
+              Q em L/min · V em m/s · h_f em m (perda distribuída). Cada cenário escala a vazão de
+              todos os trechos proporcionalmente ao Trecho 1.
+            </p>
+          </Accordion>
+        </div>
       </div>
 
       {/* SELEÇÃO DE BOMBA */}

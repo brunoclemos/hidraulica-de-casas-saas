@@ -147,6 +147,7 @@ export interface Inputs {
   temperaturaAgua: number; // °C
   pressaoDisponivelInicial: number; // mca (início do caminho crítico)
   trechos: Trecho[];
+  cenarios: number[]; // vazões de tronco (Trecho 1) para montar a curva do sistema
 }
 
 // ---------------------------------------------------------------------------
@@ -374,6 +375,35 @@ export function perdaSistemaEmVazao(inp: Inputs, vazaoTronco: number): number {
   return total;
 }
 
+export interface DetalheTrecho {
+  nome: string;
+  q: number; // L/min (escalado ao cenário)
+  v: number; // m/s
+  hf: number; // m (perda de carga distribuída)
+}
+
+/** Detalhamento por trecho (Q, V, h_f) para uma vazão de tronco — usado na validação. */
+export function detalheEmVazao(inp: Inputs, vazaoTronco: number): DetalheTrecho[] {
+  const mu = viscosidade(inp.temperaturaAgua);
+  const base = inp.trechos[0]?.vazao || 0;
+  return inp.trechos.map((t) => {
+    const dInt = dnInterno(t.dnExterno);
+    const q = base > 0 ? t.vazao * (vazaoTronco / base) : 0;
+    const lTot = t.comprimentoReal + comprimentoEquivalente(t);
+    const v = velocidade(q, dInt);
+    const re = reynolds(v, dInt, mu);
+    const f = fatorAtrito(re, dInt);
+    const hf = perdaDistribuida(f, lTot, dInt, v);
+    return { nome: t.nome, q, v, hf };
+  });
+}
+
+/** Vazão (L/min) que produz uma velocidade-alvo (m/s) num tubo de DN interno dado (mm). */
+export function vazaoParaVelocidade(velAlvo: number, dnInternoMm: number): number {
+  if (dnInternoMm <= 0 || !Number.isFinite(velAlvo)) return 0;
+  return velAlvo * (Math.PI * (dnInternoMm / 1000) ** 2 / 4) * 60000;
+}
+
 // ---------------------------------------------------------------------------
 // MOTOR PRINCIPAL
 // ---------------------------------------------------------------------------
@@ -429,10 +459,11 @@ export function calcular(inp: Inputs): Resultado {
   );
   const comprimentoTotal = trechos.reduce((s, t) => s + t.comprimentoTotal, 0);
 
-  // Curva do sistema: cenários de vazão gerados automaticamente a partir da vazão de
-  // projeto do tronco (Trecho 1). Ancoramos a faixa útil em torno da vazão de projeto.
+  // Curva do sistema a partir dos cenários de vazão de tronco. Se nenhum cenário válido
+  // for informado, gera automaticamente a partir da vazão de projeto do tronco.
   const base = inp.trechos[0]?.vazao || 0;
-  const cenariosValidos = base > 0 ? [0.5, 1, 2, 3].map((m) => base * m) : [];
+  const manuais = (inp.cenarios ?? []).filter((q) => Number.isFinite(q) && q > 0);
+  const cenariosValidos = manuais.length ? manuais : base > 0 ? [0.5, 1, 2, 3].map((m) => base * m) : [];
   const pontosSistema: [number, number][] = cenariosValidos.map((q) => [q, perdaSistemaEmVazao(inp, q)]);
   const sistema = pontosSistema.length >= 3 ? ajustaQuadratica(pontosSistema) : { a: 0, b: 0, c: 0 };
   const qMinSistema = pontosSistema.length ? Math.min(...pontosSistema.map((p) => p[0])) : 0;
