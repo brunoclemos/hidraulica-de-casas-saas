@@ -646,12 +646,20 @@ export default function RecirculacaoConsumo() {
 
         {FOTOS[f.bombaSelecionada] && (
           <div className="mt-3 flex flex-col items-center p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={FOTOS[f.bombaSelecionada].src}
-              alt={`Foto da bomba ${f.bombaSelecionada}`}
-              className="h-44 w-auto object-contain"
-            />
+            <div
+              className="flex items-center justify-center rounded-full p-3"
+              style={{
+                background:
+                  "radial-gradient(ellipse 62% 56% at 50% 46%, rgba(255,255,255,0.16), rgba(255,255,255,0.05) 45%, transparent 72%)",
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={FOTOS[f.bombaSelecionada].src}
+                alt={`Foto da bomba ${f.bombaSelecionada}`}
+                className="h-44 w-auto object-contain"
+              />
+            </div>
             <span className="mt-1 text-[11px] font-medium text-zinc-400">{f.bombaSelecionada}</span>
           </div>
         )}
