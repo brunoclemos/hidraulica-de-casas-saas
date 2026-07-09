@@ -146,9 +146,7 @@ export interface Trecho {
 export interface Inputs {
   temperaturaAgua: number; // °C
   pressaoDisponivelInicial: number; // mca (início do caminho crítico)
-  pressaoMinimaExigida: number; // mca (limiar para sinalizar residual crítico)
   trechos: Trecho[];
-  cenarios: number[]; // 4 vazões de tronco (Trecho 1) para montar a curva do sistema
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +330,6 @@ export interface TrechoResultado {
   pressurizacao: number;
   pDisponivelInicio: number;
   pResidualFinal: number;
-  ok: boolean; // residual >= pressão mínima exigida
 }
 
 export interface BombaResultado {
@@ -347,7 +344,6 @@ export interface Resultado {
   trechos: TrechoResultado[];
   perdaTotal: number; // soma das perdas ao longo do caminho crítico (mca)
   residualFinal: number; // pressão residual no ponto final (mca)
-  atendePressao: boolean;
   comprimentoTotal: number; // m
   sistema: Quadratica;
   qMinSistema: number;
@@ -423,7 +419,6 @@ export function calcular(inp: Inputs): Resultado {
       pressurizacao: t.pressurizacao,
       pDisponivelInicio: pInicio,
       pResidualFinal: pFinal,
-      ok: pFinal >= inp.pressaoMinimaExigida,
     });
   }
 
@@ -434,8 +429,10 @@ export function calcular(inp: Inputs): Resultado {
   );
   const comprimentoTotal = trechos.reduce((s, t) => s + t.comprimentoTotal, 0);
 
-  // Curva do sistema a partir dos cenários de vazão de tronco
-  const cenariosValidos = inp.cenarios.filter((q) => Number.isFinite(q) && q > 0);
+  // Curva do sistema: cenários de vazão gerados automaticamente a partir da vazão de
+  // projeto do tronco (Trecho 1). Ancoramos a faixa útil em torno da vazão de projeto.
+  const base = inp.trechos[0]?.vazao || 0;
+  const cenariosValidos = base > 0 ? [0.5, 1, 2, 3].map((m) => base * m) : [];
   const pontosSistema: [number, number][] = cenariosValidos.map((q) => [q, perdaSistemaEmVazao(inp, q)]);
   const sistema = pontosSistema.length >= 3 ? ajustaQuadratica(pontosSistema) : { a: 0, b: 0, c: 0 };
   const qMinSistema = pontosSistema.length ? Math.min(...pontosSistema.map((p) => p[0])) : 0;
@@ -454,7 +451,6 @@ export function calcular(inp: Inputs): Resultado {
     trechos,
     perdaTotal,
     residualFinal,
-    atendePressao: residualFinal >= inp.pressaoMinimaExigida,
     comprimentoTotal,
     sistema,
     qMinSistema,

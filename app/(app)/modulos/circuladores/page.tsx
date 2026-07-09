@@ -49,7 +49,6 @@ function trechoPadrao(nome: string, dnExterno: number, vazao: number): Trecho {
 const PADRAO: Form = {
   temperaturaAgua: 40,
   pressaoDisponivelInicial: 0,
-  pressaoMinimaExigida: 0,
   bombaSelecionada: BOMBAS[2].nome, // TBHWE-SS 100W Velocidade 3
   trechos: [
     {
@@ -63,7 +62,6 @@ const PADRAO: Form = {
       conexoes: { "Joelho 90°": 6 },
     },
   ],
-  cenarios: [3, 6, 12, 18],
 };
 
 const opcoesDN = DN_CPVC.map((d) => ({ value: d.externo, label: d.rotulo }));
@@ -105,9 +103,6 @@ export default function RecirculacaoConsumo() {
 
   const removeTrecho = (idx: number) =>
     setF((p) => ({ ...p, trechos: p.trechos.filter((_, i) => i !== idx) }));
-
-  const setCenario = (idx: number, v: number) =>
-    setF((p) => ({ ...p, cenarios: p.cenarios.map((c, i) => (i === idx ? v : c)) }));
 
   // ---- estado de salvamento ("Meus Projetos") ----
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -191,7 +186,7 @@ export default function RecirculacaoConsumo() {
 
       {/* PARÂMETROS GERAIS */}
       <Accordion title="Parâmetros gerais" defaultOpen>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4">
           <NumberField
             label="Temp. da água"
             value={f.temperaturaAgua}
@@ -206,13 +201,6 @@ export default function RecirculacaoConsumo() {
             unit="mca"
             hint="No início do caminho"
           />
-          <NumberField
-            label="Pressão mínima exigida"
-            value={f.pressaoMinimaExigida}
-            onChange={(v) => set("pressaoMinimaExigida", v)}
-            unit="mca"
-            hint="Limiar do alerta"
-          />
         </div>
       </Accordion>
 
@@ -223,7 +211,7 @@ export default function RecirculacaoConsumo() {
             Trechos do caminho crítico
           </h2>
           <span className="text-[11px] text-zinc-500">
-            O 1º trecho é o tronco (referência de vazão dos cenários)
+            O 1º trecho é o tronco (referência de vazão da curva do sistema)
           </span>
         </div>
 
@@ -232,12 +220,7 @@ export default function RecirculacaoConsumo() {
           const lEquiv = tr.comprimentoEquiv;
           const conexoesAtivas = Object.entries(t.conexoes).filter(([, q]) => q > 0);
           return (
-            <div
-              key={idx}
-              className={`rounded-2xl border p-4 ${
-                tr.ok ? "border-ink-600 bg-ink-800/60" : "border-red-500/50 bg-red-500/5"
-              }`}
-            >
+            <div key={idx} className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <input
                   value={t.nome}
@@ -371,11 +354,7 @@ export default function RecirculacaoConsumo() {
                 <Mini l="Veloc." v={`${num(tr.velocidade)} m/s`} />
                 <Mini l="Compr. total" v={`${num(tr.comprimentoTotal)} m`} />
                 <Mini l="Perda de carga" v={`${num(tr.perdaDistribuida)} mca`} />
-                <Mini
-                  l="Residual final"
-                  v={`${num(tr.pResidualFinal)} mca`}
-                  destaque={tr.ok ? "ok" : "erro"}
-                />
+                <Mini l="Residual final" v={`${num(tr.pResidualFinal)} mca`} />
               </div>
             </div>
           );
@@ -397,41 +376,18 @@ export default function RecirculacaoConsumo() {
         <div className="grid grid-cols-3 gap-2">
           <Hero titulo="Perda total" valor={`${num(r.perdaTotal)} mca`} />
           <Hero titulo="Comprimento" valor={`${num(r.comprimentoTotal, 1)} m`} />
-          <Hero
-            titulo="Residual final"
-            valor={`${num(r.residualFinal)} mca`}
-          />
+          <Hero titulo="Residual final" valor={`${num(r.residualFinal)} mca`} />
         </div>
-        {!r.atendePressao && (
-          <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
-            A pressão residual no ponto final ({num(r.residualFinal)} mca) está abaixo da pressão
-            mínima exigida ({num(f.pressaoMinimaExigida)} mca). Ajuste diâmetros, comprimento ou
-            adicione pressurização.
-          </p>
-        )}
       </div>
 
       {/* CURVA DO SISTEMA */}
       <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
         <h3 className="mb-1 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Curva do sistema
+          Curva do sistema × circulador
         </h3>
         <p className="mb-3 text-[12px] text-zinc-500">
-          Vazões de teste no tronco (Trecho 1). A curva H = a + b·Q + c·Q² é ajustada por regressão
-          quadrática nesses pontos.
+          Perda de carga do circuito em função da vazão, em torno da vazão de projeto do tronco.
         </p>
-        <div className="grid grid-cols-4 gap-2">
-          {f.cenarios.map((c, i) => (
-            <NumberField
-              key={i}
-              label={`Cenário ${i + 1}`}
-              value={c}
-              onChange={(v) => setCenario(i, v)}
-              unit="L/min"
-              step={0.5}
-            />
-          ))}
-        </div>
 
         <QHChart
           pontos={curvas}
