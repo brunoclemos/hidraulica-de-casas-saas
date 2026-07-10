@@ -230,7 +230,7 @@ export default function RecirculacaoConsumo() {
 
       {/* PARÂMETROS GERAIS */}
       <Accordion title="Parâmetros gerais" defaultOpen>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <NumberField
             label="Temp. da água"
             value={f.temperaturaAgua}
@@ -238,26 +238,19 @@ export default function RecirculacaoConsumo() {
             unit="°C"
             hint="Define a viscosidade"
           />
-          <NumberField
-            label="Pressão disponível inicial"
-            value={f.pressaoDisponivelInicial}
-            onChange={(v) => set("pressaoDisponivelInicial", v)}
-            unit="mca"
-            hint="No início do caminho"
-          />
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-ink-700 pt-4">
-          <Link
-            href="/modulos/balanco-vazao"
-            target="_blank"
-            className="inline-flex items-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-2.5 text-sm font-bold text-amber transition hover:bg-amber/20 active:scale-95"
-          >
-            <span aria-hidden>⚖</span> Equilibrar vazões
-          </Link>
-          <span className="text-[11px] text-zinc-500">
-            Abre a ferramenta de balanço de vazão (Anel 1 × Anel 2). Use o resultado dela para preencher a vazão dos trechos.
-          </span>
+          <div>
+            <span className="field-label">Equilíbrio entre anéis</span>
+            <Link
+              href="/modulos/balanco-vazao"
+              target="_blank"
+              className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-sm font-bold text-amber transition hover:bg-amber/20 active:scale-95"
+            >
+              <span aria-hidden>⚖</span> Equilibrar vazões
+            </Link>
+            <span className="mt-1 block text-[11px] text-zinc-500">
+              Abre a ferramenta de balanço (Anel 1 × Anel 2) em nova aba.
+            </span>
+          </div>
         </div>
       </Accordion>
 
