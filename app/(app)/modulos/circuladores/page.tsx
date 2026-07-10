@@ -203,9 +203,9 @@ export default function RecirculacaoConsumo() {
   const colunasDetalhe = useMemo(() => {
     const cols = f.cenarios
       .filter((q) => Number.isFinite(q) && q > 0)
-      .map((q, i) => ({ titulo: `Cenário ${i + 1}`, q, linhas: detalheEmVazao(f, q) }));
+      .map((q, i) => ({ titulo: `Cenário ${i + 1}`, q, linhas: detalheEmVazao(f, q), destaque: false }));
     if (qOp !== null) {
-      cols.push({ titulo: "Ponto de operação", q: qOp, linhas: detalheEmVazao(f, qOp) });
+      cols.push({ titulo: "Ponto de operação", q: qOp, linhas: detalheEmVazao(f, qOp), destaque: true });
     }
     return cols;
   }, [f, qOp]);
@@ -505,19 +505,23 @@ export default function RecirculacaoConsumo() {
                   <tr className="text-zinc-400">
                     <th className="sticky left-0 bg-ink-800 px-2 py-1 text-left font-semibold">Trecho</th>
                     {colunasDetalhe.map((col, i) => (
-                      <th key={i} colSpan={3} className="border-l border-ink-700 px-2 py-1 text-center font-semibold">
+                      <th
+                        key={i}
+                        colSpan={3}
+                        className={`border-l border-ink-700 px-2 py-1 text-center font-semibold ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}
+                      >
                         {col.titulo}
-                        <div className="text-[10px] font-normal text-zinc-500">{num(col.q, 2)} L/min</div>
+                        <div className={`text-[10px] font-normal ${col.destaque ? "text-amber/80" : "text-zinc-500"}`}>{num(col.q, 2)} L/min</div>
                       </th>
                     ))}
                   </tr>
                   <tr className="text-zinc-500">
                     <th className="sticky left-0 bg-ink-800 px-2 py-1"></th>
-                    {colunasDetalhe.map((_, i) => (
+                    {colunasDetalhe.map((col, i) => (
                       <Fragment key={i}>
-                        <th className="border-l border-ink-700 px-2 py-1 font-medium">Q</th>
-                        <th className="px-2 py-1 font-medium">V</th>
-                        <th className="px-2 py-1 font-medium">h_f</th>
+                        <th className={`border-l border-ink-700 px-2 py-1 font-medium ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}>Q</th>
+                        <th className={`px-2 py-1 font-medium ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}>V</th>
+                        <th className={`px-2 py-1 font-medium ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}>h_f</th>
                       </Fragment>
                     ))}
                   </tr>
@@ -530,11 +534,12 @@ export default function RecirculacaoConsumo() {
                       </td>
                       {colunasDetalhe.map((col, ci) => {
                         const d = col.linhas[ti];
+                        const cor = col.destaque ? "bg-amber-deep/20 font-semibold text-amber" : "text-zinc-300";
                         return (
                           <Fragment key={ci}>
-                            <td className="border-l border-ink-700 px-2 py-1 text-zinc-300">{num(d?.q ?? 0, 2)}</td>
-                            <td className="px-2 py-1 text-zinc-300">{num(d?.v ?? 0, 3)}</td>
-                            <td className="px-2 py-1 text-zinc-300">{num(d?.hf ?? 0, 3)}</td>
+                            <td className={`border-l border-ink-700 px-2 py-1 ${cor}`}>{num(d?.q ?? 0, 2)}</td>
+                            <td className={`px-2 py-1 ${cor}`}>{num(d?.v ?? 0, 3)}</td>
+                            <td className={`px-2 py-1 ${cor}`}>{num(d?.hf ?? 0, 3)}</td>
                           </Fragment>
                         );
                       })}
