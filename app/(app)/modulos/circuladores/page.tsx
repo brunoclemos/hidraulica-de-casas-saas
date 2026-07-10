@@ -195,6 +195,15 @@ export default function RecirculacaoConsumo() {
     setEstado("nao-salvo");
   }
 
+  function duplicar(p: Projeto) {
+    salvarProjeto<Form>({
+      modulo: MODULO,
+      nome: `${p.nome} (cópia)`,
+      inputs: p.inputs as Form,
+    });
+    refresh();
+  }
+
   // ---- cálculo ao vivo ----
   const r = useMemo(() => calcular(f), [f]);
   const bombaSel = BOMBAS.find((b) => b.nome === f.bombaSelecionada) ?? BOMBAS[0];
@@ -681,6 +690,12 @@ export default function RecirculacaoConsumo() {
                 <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
                   <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
                   <div className="text-[11px] text-zinc-500">salvo {tempoRelativo(p.atualizadoEm)}</div>
+                </button>
+                <button
+                  onClick={() => duplicar(p)}
+                  className="ml-3 text-xs text-zinc-500 hover:text-amber"
+                >
+                  duplicar
                 </button>
                 <button
                   onClick={() => {
