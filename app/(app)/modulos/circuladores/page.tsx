@@ -86,9 +86,6 @@ const PADRAO: Form = {
   cenarios: [3, 6, 18, 22],
 };
 
-// planilha externa de balanço de vazão (o cliente usa por fora — abre/baixa via botão)
-const PLANILHA_BALANCO = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/Ferreto_Balanco_Vazao_Recirculacao_v2.xlsx`;
-
 const opcoesDN = DN_CPVC.map((d) => ({ value: d.externo, label: d.rotulo }));
 const opcoesAquecedor = [
   { value: "", label: "Nenhum" },
@@ -251,15 +248,15 @@ export default function RecirculacaoConsumo() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-ink-700 pt-4">
-          <a
-            href={PLANILHA_BALANCO}
-            download
+          <Link
+            href="/modulos/balanco-vazao"
+            target="_blank"
             className="inline-flex items-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-2.5 text-sm font-bold text-amber transition hover:bg-amber/20 active:scale-95"
           >
-            <span aria-hidden>⇩</span> Equilibrar vazões
-          </a>
+            <span aria-hidden>⚖</span> Equilibrar vazões
+          </Link>
           <span className="text-[11px] text-zinc-500">
-            Abre a planilha de balanço de vazão (cálculo à parte). Use o resultado dela para preencher a vazão dos trechos.
+            Abre a ferramenta de balanço de vazão (Anel 1 × Anel 2). Use o resultado dela para preencher a vazão dos trechos.
           </span>
         </div>
       </Accordion>

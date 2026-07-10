@@ -40,6 +40,12 @@ const MODULOS = [
     desc: "Perda de carga trecho a trecho, curva do sistema e seleção do circulador de recirculação.",
     ativo: true,
   },
+  {
+    slug: "balanco-vazao",
+    nome: "Balanço de Vazão (Anel 1 × Anel 2)",
+    desc: "Divide a vazão do tronco entre dois anéis em paralelo e mostra o tempo de recirculação de cada um.",
+    ativo: true,
+  },
 ];
 
 export default function Dashboard() {
