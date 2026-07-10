@@ -240,7 +240,7 @@ export default function RecirculacaoConsumo() {
 
       {/* PARÂMETROS GERAIS */}
       <Accordion title="Parâmetros gerais" defaultOpen>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,0.8fr)_1fr_1fr]">
           <NumberField
             label="Temp. da água"
             value={f.temperaturaAgua}
@@ -248,6 +248,19 @@ export default function RecirculacaoConsumo() {
             unit="°C"
             hint="Define a viscosidade"
           />
+          <div>
+            <span className="field-label">Tempo de espera / purga</span>
+            <a
+              href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/Tempo_de_Espera_AQ_Ferreto.xlsx`}
+              download
+              className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-sm font-bold text-amber transition hover:bg-amber/20 active:scale-95"
+            >
+              <span aria-hidden>💧</span> Purga
+            </a>
+            <span className="mt-1 block text-[11px] text-zinc-500">
+              Abre a planilha de tempo de espera / purga.
+            </span>
+          </div>
           <div>
             <span className="field-label">Equilíbrio entre anéis</span>
             <Link
