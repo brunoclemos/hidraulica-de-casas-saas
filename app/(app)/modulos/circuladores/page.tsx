@@ -149,6 +149,9 @@ export default function RecirculacaoConsumo() {
   const [salvoEm, setSalvoEm] = useState<number | null>(null);
   const [projetos, setProjetos] = useState<Projeto[]>([]);
   const snapshot = useRef<string>("");
+  // edição inline do nome de um projeto salvo
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [editNome, setEditNome] = useState("");
 
   const refresh = () => setProjetos(listarProjetos(MODULO));
   useEffect(() => {
@@ -201,6 +204,19 @@ export default function RecirculacaoConsumo() {
       nome: `${p.nome} (cópia)`,
       inputs: p.inputs as Form,
     });
+    refresh();
+  }
+
+  function iniciarRenomear(p: Projeto) {
+    setEditandoId(p.id);
+    setEditNome(p.nome);
+  }
+
+  function confirmarRenomear(p: Projeto) {
+    const novoNome = editNome.trim() || p.nome;
+    salvarProjeto<Form>({ id: p.id, modulo: MODULO, nome: novoNome, inputs: p.inputs as Form });
+    if (p.id === projetoId) setNome(novoNome);
+    setEditandoId(null);
     refresh();
   }
 
@@ -687,26 +703,49 @@ export default function RecirculacaoConsumo() {
                   p.id === projetoId ? "border-amber/50 bg-amber/5" : "border-ink-600"
                 }`}
               >
-                <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
-                  <div className="text-[11px] text-zinc-500">salvo {tempoRelativo(p.atualizadoEm)}</div>
-                </button>
-                <button
-                  onClick={() => duplicar(p)}
-                  className="ml-3 text-xs text-zinc-500 hover:text-amber"
-                >
-                  duplicar
-                </button>
-                <button
-                  onClick={() => {
-                    excluirProjeto(p.id);
-                    if (p.id === projetoId) novo();
-                    refresh();
-                  }}
-                  className="ml-3 text-xs text-zinc-500 hover:text-red-400"
-                >
-                  excluir
-                </button>
+                {editandoId === p.id ? (
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <input
+                      autoFocus
+                      value={editNome}
+                      onChange={(e) => setEditNome(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") confirmarRenomear(p);
+                        if (e.key === "Escape") setEditandoId(null);
+                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-amber/50 bg-ink-800 px-2 py-1.5 text-sm font-medium text-zinc-100 outline-none"
+                    />
+                    <button onClick={() => confirmarRenomear(p)} className="shrink-0 text-xs font-bold text-amber">
+                      salvar
+                    </button>
+                    <button onClick={() => setEditandoId(null)} className="shrink-0 text-xs text-zinc-500 hover:text-zinc-300">
+                      cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
+                      <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
+                      <div className="text-[11px] text-zinc-500">salvo {tempoRelativo(p.atualizadoEm)}</div>
+                    </button>
+                    <button onClick={() => iniciarRenomear(p)} className="ml-3 text-xs text-zinc-500 hover:text-amber">
+                      renomear
+                    </button>
+                    <button onClick={() => duplicar(p)} className="ml-3 text-xs text-zinc-500 hover:text-amber">
+                      duplicar
+                    </button>
+                    <button
+                      onClick={() => {
+                        excluirProjeto(p.id);
+                        if (p.id === projetoId) novo();
+                        refresh();
+                      }}
+                      className="ml-3 text-xs text-zinc-500 hover:text-red-400"
+                    >
+                      excluir
+                    </button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
