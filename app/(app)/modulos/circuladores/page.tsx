@@ -308,21 +308,6 @@ export default function RecirculacaoConsumo() {
                   unit="m"
                   step={0.1}
                 />
-                <NumberField
-                  label="Desnível"
-                  value={t.desnivel}
-                  onChange={(v) => patchTrecho(idx, { desnivel: v })}
-                  unit="m"
-                  step={0.1}
-                  hint="+ sobe / − desce"
-                />
-                <NumberField
-                  label="Pressurização"
-                  value={t.pressurizacao}
-                  onChange={(v) => patchTrecho(idx, { pressurizacao: v })}
-                  unit="mca"
-                  step={0.1}
-                />
                 <div className="flex flex-col justify-center rounded-xl bg-ink-700 px-3 py-2">
                   <span className="text-[10px] uppercase tracking-wider text-zinc-400">Comp. equiv.</span>
                   <span className="text-sm font-semibold text-zinc-200">{num(lEquiv)} m</span>
@@ -357,10 +342,25 @@ export default function RecirculacaoConsumo() {
                 </Accordion>
               </div>
 
-              {/* Perdas locais */}
+              {/* Desnível, pressurização & perdas locais */}
               <div className="mt-2">
-                <Accordion title="Perdas locais (registro, válvula, aquecedor)">
+                <Accordion title="Desnível, pressurização & perdas locais">
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                    <NumberField
+                      label="Desnível"
+                      value={t.desnivel}
+                      onChange={(v) => patchTrecho(idx, { desnivel: v })}
+                      unit="m"
+                      step={0.1}
+                      hint="+ sobe / − desce"
+                    />
+                    <NumberField
+                      label="Pressurização"
+                      value={t.pressurizacao}
+                      onChange={(v) => patchTrecho(idx, { pressurizacao: v })}
+                      unit="mca"
+                      step={0.1}
+                    />
                     <NumberField
                       label="Registros de pressão"
                       value={t.registrosPressao}
@@ -586,8 +586,8 @@ export default function RecirculacaoConsumo() {
 
         {bombaSelRes && (
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <Hero tone="light" titulo="Vazão de operação" valor={bombaSelRes.qOp !== null ? `${num(bombaSelRes.qOp, 1)} L/min` : "—"} />
-            <Hero tone="light" titulo="Pressão de operação" valor={bombaSelRes.hOp !== null ? `${num(bombaSelRes.hOp)} mca` : "—"} />
+            <Hero tone="destaque" titulo="Vazão de operação" valor={bombaSelRes.qOp !== null ? `${num(bombaSelRes.qOp, 1)} L/min` : "—"} />
+            <Hero tone="destaque" titulo="Pressão de operação" valor={bombaSelRes.hOp !== null ? `${num(bombaSelRes.hOp)} mca` : "—"} />
             <div className="flex flex-col justify-center rounded-2xl bg-ink-600 p-3">
               <div className="text-[11px] uppercase tracking-wider text-zinc-400">Faixa útil</div>
               <div className={`mt-0.5 font-display text-sm font-bold ${bombaSelRes.atende ? "text-emerald-400" : "text-red-400"}`}>
@@ -608,12 +608,14 @@ export default function RecirculacaoConsumo() {
               </tr>
             </thead>
             <tbody>
-              {r.bombas.map((b) => (
+              {r.bombas.map((b) => {
+                const selecionada = b.nome === f.bombaSelecionada;
+                return (
                 <tr
                   key={b.nome}
-                  className={`border-t border-ink-500 ${b.nome === f.bombaSelecionada ? "bg-amber/10" : ""}`}
+                  className={`border-t border-ink-500 ${selecionada ? "bg-amber-deep/20" : ""}`}
                 >
-                  <td className="py-2 pr-2 text-zinc-300">{b.nome}</td>
+                  <td className={`py-2 pr-2 ${selecionada ? "font-semibold text-amber" : "text-zinc-300"}`}>{b.nome}</td>
                   <td className="py-2 text-right text-zinc-300">
                     {b.qOp !== null ? `${num(b.qOp, 1)}` : "—"}
                   </td>
@@ -624,7 +626,8 @@ export default function RecirculacaoConsumo() {
                     {b.atende ? "sim" : "fora"}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -824,9 +827,14 @@ function QHChart({
 // Componentes de resultado
 // ---------------------------------------------------------------------------
 
-function Hero({ titulo, valor, tone = "grey" }: { titulo: string; valor: string; tone?: "grey" | "light" }) {
-  // tom cinza que "salta" do card; "light" (mais claro) para uso dentro da seção da bomba
-  const bg = tone === "light" ? "bg-ink-600" : "bg-ink-700";
+function Hero({ titulo, valor, tone = "grey" }: { titulo: string; valor: string; tone?: "grey" | "light" | "destaque" }) {
+  // "grey"/"light" = tons de cinza; "destaque" = amarelo escuro (ponto de operação)
+  const bg =
+    tone === "destaque"
+      ? "bg-amber-deep/20 ring-1 ring-amber-deep/50"
+      : tone === "light"
+      ? "bg-ink-600"
+      : "bg-ink-700";
   return (
     <div className={`rounded-2xl ${bg} p-3`}>
       <div className="text-[11px] uppercase tracking-wider text-zinc-400">{titulo}</div>
