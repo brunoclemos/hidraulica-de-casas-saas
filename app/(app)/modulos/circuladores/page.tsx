@@ -129,6 +129,16 @@ export default function RecirculacaoConsumo() {
   const setCenario = (idx: number, v: number) =>
     setF((p) => ({ ...p, cenarios: p.cenarios.map((c, i) => (i === idx ? v : c)) }));
 
+  // painéis expansíveis (Conexões / Perdas locais) por trecho — abrem em largura total
+  const [paineis, setPaineis] = useState<Set<string>>(() => new Set());
+  const togglePainel = (key: string) =>
+    setPaineis((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+
   // velocidade-alvo (helper transitório p/ arbitrar a vazão pela velocidade no Trecho 1)
   const [velAlvo, setVelAlvo] = useState(2.5);
 
@@ -312,13 +322,23 @@ export default function RecirculacaoConsumo() {
                   <span className="text-[10px] uppercase tracking-wider text-zinc-400">Comp. equiv.</span>
                   <span className="text-sm font-semibold text-zinc-200">{num(lEquiv)} m</span>
                 </div>
+                <PainelBtn
+                  titulo="Conexões"
+                  resumo={`${conexoesAtivas.length} tipo(s) · ${num(lEquiv)} m`}
+                  aberto={paineis.has(`${idx}:conex`)}
+                  onClick={() => togglePainel(`${idx}:conex`)}
+                />
+                <PainelBtn
+                  titulo="Perdas locais"
+                  resumo="registro, válvula, aquecedor"
+                  aberto={paineis.has(`${idx}:perdas`)}
+                  onClick={() => togglePainel(`${idx}:perdas`)}
+                />
               </div>
 
-              {/* Conexões */}
-              <div className="mt-3">
-                <Accordion
-                  title={`Conexões — ${conexoesAtivas.length} tipo(s) · ${num(lEquiv)} m equiv.`}
-                >
+              {/* Conexões — conteúdo em largura total */}
+              {paineis.has(`${idx}:conex`) && (
+                <div className="mt-3 rounded-xl border border-amber/30 bg-ink-900/40 p-3">
                   <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                     {CONEXOES.map((c) => (
                       <div key={c.nome} className="flex items-center gap-2">
@@ -339,12 +359,12 @@ export default function RecirculacaoConsumo() {
                       </div>
                     ))}
                   </div>
-                </Accordion>
-              </div>
+                </div>
+              )}
 
-              {/* Perdas locais */}
-              <div className="mt-2">
-                <Accordion title="Perdas locais (registro, válvula, aquecedor)">
+              {/* Perdas locais — conteúdo em largura total */}
+              {paineis.has(`${idx}:perdas`) && (
+                <div className="mt-2 rounded-xl border border-amber/30 bg-ink-900/40 p-3">
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                     <NumberField
                       label="Registros de pressão"
@@ -381,8 +401,8 @@ export default function RecirculacaoConsumo() {
                       min={0}
                     />
                   </div>
-                </Accordion>
-              </div>
+                </div>
+              )}
 
               {/* resultado do trecho */}
               <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] sm:grid-cols-4">
@@ -830,6 +850,34 @@ function Hero({ titulo, valor, tone = "grey" }: { titulo: string; valor: string;
       <div className="text-[11px] uppercase tracking-wider text-zinc-400">{titulo}</div>
       <div className="mt-0.5 font-display text-lg font-bold text-amber">{valor}</div>
     </div>
+  );
+}
+
+function PainelBtn({
+  titulo,
+  resumo,
+  aberto,
+  onClick,
+}: {
+  titulo: string;
+  resumo: string;
+  aberto: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex h-full flex-col justify-center rounded-xl border px-3 py-2 text-left transition ${
+        aberto ? "border-amber/60 bg-amber/10" : "border-ink-600 bg-ink-700 hover:border-amber/40"
+      }`}
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-400">{titulo}</span>
+        <span className="font-bold text-amber">{aberto ? "−" : "+"}</span>
+      </span>
+      <span className="mt-0.5 truncate text-[11px] leading-tight text-zinc-300">{resumo}</span>
+    </button>
   );
 }
 
