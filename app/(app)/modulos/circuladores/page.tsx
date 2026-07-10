@@ -613,16 +613,16 @@ export default function RecirculacaoConsumo() {
                 return (
                 <tr
                   key={b.nome}
-                  className={`border-t border-ink-500 ${selecionada ? "bg-amber-deep/20" : ""}`}
+                  className={`border-t border-ink-500 ${selecionada ? "bg-amber-deep/45 ring-1 ring-amber" : ""}`}
                 >
-                  <td className={`py-2 pr-2 ${selecionada ? "font-semibold text-amber" : "text-zinc-300"}`}>{b.nome}</td>
-                  <td className="py-2 text-right text-zinc-300">
+                  <td className={`py-2 pl-2 pr-2 ${selecionada ? "border-l-4 border-amber font-bold text-amber" : "text-zinc-300"}`}>{b.nome}</td>
+                  <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>
                     {b.qOp !== null ? `${num(b.qOp, 1)}` : "—"}
                   </td>
-                  <td className="py-2 text-right text-zinc-300">
+                  <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>
                     {b.hOp !== null ? `${num(b.hOp)}` : "—"}
                   </td>
-                  <td className={`py-2 text-right font-semibold ${b.atende ? "text-emerald-400" : "text-zinc-600"}`}>
+                  <td className={`py-2 pr-2 text-right font-semibold ${selecionada ? "text-amber" : b.atende ? "text-emerald-400" : "text-zinc-600"}`}>
                     {b.atende ? "sim" : "fora"}
                   </td>
                 </tr>
