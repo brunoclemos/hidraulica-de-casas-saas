@@ -7,6 +7,8 @@ const repo = "hidraulica-de-casas-saas";
 
 const nextConfig = {
   reactStrictMode: true,
+  // exposto ao cliente p/ montar URLs de assets estáticos (ex.: planilha em public/)
+  env: { NEXT_PUBLIC_BASE_PATH: isPages ? `/${repo}` : "" },
   ...(isPages
     ? {
         output: "export",
