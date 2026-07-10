@@ -46,6 +46,12 @@ const MODULOS = [
     desc: "Divide a vazão do tronco entre dois anéis em paralelo e mostra o tempo de recirculação de cada um.",
     ativo: true,
   },
+  {
+    slug: "tempo-espera",
+    nome: "Tempo de Espera (Purga)",
+    desc: "Tempo até a água quente chegar, somando vários trechos em série.",
+    ativo: true,
+  },
 ];
 
 export default function Dashboard() {

@@ -250,15 +250,15 @@ export default function RecirculacaoConsumo() {
           />
           <div>
             <span className="field-label">Tempo de espera / purga</span>
-            <a
-              href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/Tempo_de_Espera_AQ_Ferreto.xlsx`}
-              download
+            <Link
+              href="/modulos/tempo-espera"
+              target="_blank"
               className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-sm font-bold text-amber transition hover:bg-amber/20 active:scale-95"
             >
-              <span aria-hidden>💧</span> Purga
-            </a>
+              Purga
+            </Link>
             <span className="mt-1 block text-[11px] text-zinc-500">
-              Abre a planilha de tempo de espera / purga.
+              Abre a ferramenta de tempo de espera (vários trechos) em nova aba.
             </span>
           </div>
           <div>
