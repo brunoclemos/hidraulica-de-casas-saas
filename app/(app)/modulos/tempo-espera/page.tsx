@@ -85,20 +85,6 @@ export default function TempoEspera() {
         <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
       </div>
 
-      {/* TOTAL (destaque no topo) */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-amber/40 bg-amber-deep/20 p-4">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-300">Tempo total de espera</div>
-          <div className="mt-0.5 font-display text-3xl font-bold text-amber">{minSeg(r.tempoTotalSeg)}</div>
-          <div className="text-[11px] text-zinc-400">{num(r.tempoTotalSeg, 1)} s · {f.trechos.length} trecho(s)</div>
-        </div>
-        <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-400">Volume total (desperdício)</div>
-          <div className="mt-0.5 font-display text-3xl font-bold text-zinc-100">{num(r.volumeTotal)} L</div>
-          <div className="text-[11px] text-zinc-500">Água fria descartada até chegar a quente</div>
-        </div>
-      </div>
-
       {/* TRECHOS */}
       <div className="space-y-3">
         {r.trechos.map((tr, idx) => {
@@ -138,6 +124,20 @@ export default function TempoEspera() {
         >
           + Adicionar mais um trecho
         </button>
+      </div>
+
+      {/* RESULTADO (total) — depois do preenchimento */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-amber/40 bg-amber-deep/20 p-4">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-300">Tempo total de espera</div>
+          <div className="mt-0.5 font-display text-3xl font-bold text-amber">{minSeg(r.tempoTotalSeg)}</div>
+          <div className="text-[11px] text-zinc-400">{num(r.tempoTotalSeg, 1)} s · {f.trechos.length} trecho(s)</div>
+        </div>
+        <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-400">Volume total (desperdício)</div>
+          <div className="mt-0.5 font-display text-3xl font-bold text-zinc-100">{num(r.volumeTotal)} L</div>
+          <div className="text-[11px] text-zinc-500">Água fria descartada até chegar a quente</div>
+        </div>
       </div>
 
       {/* MEUS PROJETOS */}

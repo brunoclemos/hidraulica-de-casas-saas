@@ -268,7 +268,7 @@ export default function RecirculacaoConsumo() {
               target="_blank"
               className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-3 text-sm font-bold text-amber transition hover:bg-amber/20 active:scale-95"
             >
-              <span aria-hidden>⚖</span> Equilibrar vazões
+              Equilibrar vazões
             </Link>
             <span className="mt-1 block text-[11px] text-zinc-500">
               Abre a ferramenta de balanço (Anel 1 × Anel 2) em nova aba.
