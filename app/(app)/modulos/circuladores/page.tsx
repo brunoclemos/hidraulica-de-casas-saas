@@ -342,25 +342,10 @@ export default function RecirculacaoConsumo() {
                 </Accordion>
               </div>
 
-              {/* Desnível, pressurização & perdas locais */}
+              {/* Perdas locais */}
               <div className="mt-2">
-                <Accordion title="Desnível, pressurização & perdas locais">
+                <Accordion title="Perdas locais (registro, válvula, aquecedor)">
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                    <NumberField
-                      label="Desnível"
-                      value={t.desnivel}
-                      onChange={(v) => patchTrecho(idx, { desnivel: v })}
-                      unit="m"
-                      step={0.1}
-                      hint="+ sobe / − desce"
-                    />
-                    <NumberField
-                      label="Pressurização"
-                      value={t.pressurizacao}
-                      onChange={(v) => patchTrecho(idx, { pressurizacao: v })}
-                      unit="mca"
-                      step={0.1}
-                    />
                     <NumberField
                       label="Registros de pressão"
                       value={t.registrosPressao}
