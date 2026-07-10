@@ -128,8 +128,6 @@ export const BOMBAS: { nome: string; pontos: [number, number][] }[] = [
 // TIPOS DE ENTRADA
 // ---------------------------------------------------------------------------
 
-export type Anel = "tronco" | "1" | "2";
-
 export interface Trecho {
   nome: string;
   dnExterno: number; // mm (chave da tabela CPVC)
@@ -143,7 +141,6 @@ export interface Trecho {
   kvValvula: number; // Kv da válvula misturadora (m³/h)
   aquecedorModelo: string; // "" = nenhum
   aquecedorQtd: number; // nº de aquecedores em paralelo
-  anel?: Anel; // a que anel o trecho pertence (para a divisão de vazão). Padrão: tronco.
 }
 
 export interface Inputs {
@@ -363,7 +360,6 @@ export function perdaSistemaEmVazao(inp: Inputs, vazaoTronco: number): number {
   if (base === 0) return 0;
   let total = 0;
   for (const t of inp.trechos) {
-    if (t.anel === "2") continue; // Anel 2 é usado só na divisão de vazão, não no caminho crítico
     const dInt = dnInterno(t.dnExterno);
     // escala proporcional ao Trecho 1
     const q = t.vazao * (vazaoTronco / base);
@@ -386,12 +382,11 @@ export interface DetalheTrecho {
   hf: number; // m (perda de carga distribuída)
 }
 
-/** Detalhamento por trecho (Q, V, h_f) para uma vazão de tronco — usado na validação.
- *  Considera só o caminho crítico (tronco + Anel 1); Anel 2 fica fora. */
+/** Detalhamento por trecho (Q, V, h_f) para uma vazão de tronco — usado na validação. */
 export function detalheEmVazao(inp: Inputs, vazaoTronco: number): DetalheTrecho[] {
   const mu = viscosidade(inp.temperaturaAgua);
   const base = inp.trechos[0]?.vazao || 0;
-  return inp.trechos.filter((t) => t.anel !== "2").map((t) => {
+  return inp.trechos.map((t) => {
     const dInt = dnInterno(t.dnExterno);
     const q = base > 0 ? t.vazao * (vazaoTronco / base) : 0;
     const lTot = t.comprimentoReal + comprimentoEquivalente(t);
@@ -407,80 +402,6 @@ export function detalheEmVazao(inp: Inputs, vazaoTronco: number): DetalheTrecho[
 export function vazaoParaVelocidade(velAlvo: number, dnInternoMm: number): number {
   if (dnInternoMm <= 0 || !Number.isFinite(velAlvo)) return 0;
   return velAlvo * (Math.PI * (dnInternoMm / 1000) ** 2 / 4) * 60000;
-}
-
-// ---------------------------------------------------------------------------
-// DIVISÃO DE VAZÃO ENTRE ANÉIS (loops em paralelo)
-// ---------------------------------------------------------------------------
-
-/** Perda de carga (mca) de um conjunto de trechos, todos percorridos pela vazão Q (L/min). */
-function perdaConjunto(mu: number, trechos: Trecho[], Q: number): number {
-  let total = 0;
-  for (const t of trechos) {
-    const dInt = dnInterno(t.dnExterno);
-    const lTot = t.comprimentoReal + comprimentoEquivalente(t);
-    const v = velocidade(Q, dInt);
-    const re = reynolds(v, dInt, mu);
-    const f = fatorAtrito(re, dInt);
-    total += perdaDistribuida(f, lTot, dInt, v);
-    total += perdaRegistro(Q, dInt, t.registrosPressao);
-    total += perdaValvula(Q, t.kvValvula, t.valvulasMisturadoras);
-    total += perdaAquecedor(Q, t.aquecedorModelo, t.aquecedorQtd);
-  }
-  return total;
-}
-
-export interface DivisaoVazao {
-  q1: number; // L/min no anel 1
-  q2: number; // L/min no anel 2
-  perda1: number; // perda de carga no anel 1 (mca) — deve ~igualar perda2
-  perda2: number;
-}
-
-/**
- * Divide a vazão total do tronco entre o Anel 1 e o Anel 2 (loops em paralelo).
- * Como os anéis partem e voltam ao mesmo ponto, a divisão ocorre quando a perda de
- * carga nos dois anéis se iguala: perda(anel1, Q1) = perda(anel2, Q2), com Q1+Q2=total.
- * (O tronco é comum aos dois caminhos e não entra na comparação.)
- * Retorna null se não houver trechos marcados nos dois anéis.
- */
-export function dividirVazao(inp: Inputs, vazaoTronco: number): DivisaoVazao | null {
-  const a1 = inp.trechos.filter((t) => t.anel === "1");
-  const a2 = inp.trechos.filter((t) => t.anel === "2");
-  if (!a1.length || !a2.length || vazaoTronco <= 0) return null;
-  const mu = viscosidade(inp.temperaturaAgua);
-  // g(Q1) = perda(anel1,Q1) - perda(anel2, total-Q1) é monotônica crescente em Q1.
-  // g(0) = -perda(anel2,total) < 0 ; g(total) = perda(anel1,total) > 0 → raiz única.
-  const g = (q1: number) => perdaConjunto(mu, a1, q1) - perdaConjunto(mu, a2, vazaoTronco - q1);
-  let lo = 0, hi = vazaoTronco;
-  for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    if (g(mid) > 0) hi = mid;
-    else lo = mid;
-  }
-  const q1 = (lo + hi) / 2;
-  const q2 = vazaoTronco - q1;
-  return { q1, q2, perda1: perdaConjunto(mu, a1, q1), perda2: perdaConjunto(mu, a2, q2) };
-}
-
-// ---------------------------------------------------------------------------
-// RECIRCULAÇÃO (estimativa por tempo)
-// ---------------------------------------------------------------------------
-
-/** Volume interno total das tubulações (litros) — usa o comprimento REAL dos trechos. */
-export function volumeTotal(inp: Inputs): number {
-  let m3 = 0;
-  for (const t of inp.trechos) {
-    const dInt = dnInterno(t.dnExterno);
-    m3 += (Math.PI * (dInt / 1000) ** 2) / 4 * t.comprimentoReal;
-  }
-  return m3 * 1000; // m³ -> L
-}
-
-/** Vazão total (L/min) para recircular todo o volume das tubulações em `tempoMin` minutos. */
-export function vazaoParaTempo(inp: Inputs, tempoMin: number): number {
-  if (tempoMin <= 0) return 0;
-  return volumeTotal(inp) / tempoMin;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,12 +425,10 @@ export function calcular(inp: Inputs): Resultado {
     const pValv = perdaValvula(t.vazao, t.kvValvula, t.valvulasMisturadoras);
     const pAq = perdaAquecedor(t.vazao, t.aquecedorModelo, t.aquecedorQtd);
 
-    // Anel 2 não entra no caminho crítico (só na divisão de vazão): sem residual encadeado.
-    const noCaminho = t.anel !== "2";
-    const pInicio = noCaminho ? pAnterior : NaN;
+    const pInicio = pAnterior;
     // Residual: entra - perda_carga - desnível + pressurização - registro - válvula - aquecedor
-    const pFinal = noCaminho ? pInicio - hf - t.desnivel + t.pressurizacao - pReg - pValv - pAq : NaN;
-    if (noCaminho) pAnterior = pFinal;
+    const pFinal = pInicio - hf - t.desnivel + t.pressurizacao - pReg - pValv - pAq;
+    pAnterior = pFinal;
 
     trechos.push({
       nome: t.nome,
@@ -533,16 +452,12 @@ export function calcular(inp: Inputs): Resultado {
     });
   }
 
-  // Agregados do caminho crítico = tronco + Anel 1 (Anel 2 fica só na divisão de vazão).
-  const criticos = trechos.filter((_, i) => inp.trechos[i].anel !== "2");
-  const residualFinal = criticos.length
-    ? criticos[criticos.length - 1].pResidualFinal
-    : inp.pressaoDisponivelInicial;
-  const perdaTotal = criticos.reduce(
+  const residualFinal = trechos.length ? trechos[trechos.length - 1].pResidualFinal : inp.pressaoDisponivelInicial;
+  const perdaTotal = trechos.reduce(
     (s, t) => s + t.perdaDistribuida + t.perdaRegistro + t.perdaValvula + t.perdaAquecedor,
     0
   );
-  const comprimentoTotal = criticos.reduce((s, t) => s + t.comprimentoTotal, 0);
+  const comprimentoTotal = trechos.reduce((s, t) => s + t.comprimentoTotal, 0);
 
   // Curva do sistema a partir dos cenários de vazão de tronco. Se nenhum cenário válido
   // for informado, gera automaticamente a partir da vazão de projeto do tronco.
