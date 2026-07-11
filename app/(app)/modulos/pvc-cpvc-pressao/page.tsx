@@ -22,9 +22,12 @@ import {
   listarProjetos,
   salvarProjeto,
   excluirProjeto,
+  buscarProjeto,
+  nomesClientes,
   tempoRelativo,
   Projeto,
 } from "@/lib/projetos";
+import { ClienteField } from "@/components/ClienteField";
 
 const MODULO = "pvc-cpvc-pressao";
 
@@ -64,15 +67,29 @@ export default function PvcCpvcPressao() {
 
   // --- estado de salvamento ("Meus Projetos") ---
   const [projetoId, setProjetoId] = useState<string | null>(null);
+  const [cliente, setCliente] = useState("");
   const [nome, setNome] = useState("");
   const [estado, setEstado] = useState<EstadoSalvo>("nao-salvo");
   const [salvoEm, setSalvoEm] = useState<number | null>(null);
   const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [clientesSug, setClientesSug] = useState<string[]>([]);
   const snapshot = useRef<string>("");
 
-  const refresh = () => setProjetos(listarProjetos(MODULO));
+  const refresh = () => {
+    setProjetos(listarProjetos(MODULO));
+    setClientesSug(nomesClientes());
+  };
   useEffect(() => {
     refresh();
+  }, []);
+
+  // deep-link: /modulos/<slug>?projeto=<id> reabre o cálculo (vindo da tela de Clientes)
+  useEffect(() => {
+    const pid = new URLSearchParams(window.location.search).get("projeto");
+    if (!pid) return;
+    const p = buscarProjeto(pid);
+    if (p && p.modulo === MODULO) carregar(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -86,6 +103,7 @@ export default function PvcCpvcPressao() {
     const p = salvarProjeto<Form>({
       id: projetoId ?? undefined,
       modulo: MODULO,
+      cliente: cliente.trim() || undefined,
       nome: nome.trim() || "Sem nome",
       inputs: f,
     });
@@ -115,6 +133,7 @@ export default function PvcCpvcPressao() {
     setDraft(freshDraft(inputs.material, inputs.trechos.length));
     setEditIndex(null);
     setProjetoId(p.id);
+    setCliente(p.cliente ?? "");
     setNome(p.nome);
     snapshot.current = JSON.stringify(inputs);
     setSalvoEm(p.atualizadoEm);
@@ -126,6 +145,7 @@ export default function PvcCpvcPressao() {
     setDraft(freshDraft("PVC", 0));
     setEditIndex(null);
     setProjetoId(null);
+    setCliente("");
     setNome("");
     snapshot.current = "";
     setSalvoEm(null);
@@ -739,6 +759,7 @@ export default function PvcCpvcPressao() {
               >
                 + Inserir no projeto ({f.trechos.length})
               </button>
+              <ClienteField value={cliente} onChange={setCliente} sugestoes={clientesSug} className="hidden w-36 shrink-0 sm:block" />
               <input
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
@@ -755,12 +776,15 @@ export default function PvcCpvcPressao() {
           )}
           {/* campo de nome no mobile */}
           {!editando && (
-            <input
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              placeholder="Nome do projeto (ex.: Casa Jerivá - prumada AF)"
-              className="mt-2 w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60 sm:hidden"
-            />
+            <>
+              <ClienteField value={cliente} onChange={setCliente} sugestoes={clientesSug} className="mt-2 w-full sm:hidden" />
+              <input
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                placeholder="Nome do projeto (ex.: Casa Jerivá - prumada AF)"
+                className="mt-2 w-full rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60 sm:hidden"
+              />
+            </>
           )}
         </div>
       </div>

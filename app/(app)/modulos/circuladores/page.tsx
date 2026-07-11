@@ -21,9 +21,12 @@ import {
   listarProjetos,
   salvarProjeto,
   excluirProjeto,
+  buscarProjeto,
+  nomesClientes,
   tempoRelativo,
   Projeto,
 } from "@/lib/projetos";
+import { ClienteField } from "@/components/ClienteField";
 import fotoTbhweSs from "./fotos/tbhwe-ss-100w.png";
 import fotoTbhweIp from "./fotos/tbhwe-ip-br-120w.png";
 import fotoTbhux from "./fotos/tbhux-rn.png";
@@ -144,18 +147,32 @@ export default function RecirculacaoConsumo() {
 
   // ---- estado de salvamento ("Meus Projetos") ----
   const [projetoId, setProjetoId] = useState<string | null>(null);
+  const [cliente, setCliente] = useState("");
   const [nome, setNome] = useState("");
   const [estado, setEstado] = useState<EstadoSalvo>("nao-salvo");
   const [salvoEm, setSalvoEm] = useState<number | null>(null);
   const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [clientesSug, setClientesSug] = useState<string[]>([]);
   const snapshot = useRef<string>("");
   // edição inline do nome de um projeto salvo
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [editNome, setEditNome] = useState("");
 
-  const refresh = () => setProjetos(listarProjetos(MODULO));
+  const refresh = () => {
+    setProjetos(listarProjetos(MODULO));
+    setClientesSug(nomesClientes());
+  };
   useEffect(() => {
     refresh();
+  }, []);
+
+  // deep-link: /modulos/<slug>?projeto=<id> reabre o cálculo (vindo da tela de Clientes)
+  useEffect(() => {
+    const pid = new URLSearchParams(window.location.search).get("projeto");
+    if (!pid) return;
+    const p = buscarProjeto(pid);
+    if (p && p.modulo === MODULO) carregar(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -169,6 +186,7 @@ export default function RecirculacaoConsumo() {
     const p = salvarProjeto<Form>({
       id: projetoId ?? undefined,
       modulo: MODULO,
+      cliente: cliente.trim() || undefined,
       nome: nome.trim() || "Sem nome",
       inputs: f,
     });
@@ -183,6 +201,7 @@ export default function RecirculacaoConsumo() {
   function carregar(p: Projeto) {
     setF(p.inputs as Form);
     setProjetoId(p.id);
+    setCliente(p.cliente ?? "");
     setNome(p.nome);
     snapshot.current = JSON.stringify(p.inputs);
     setSalvoEm(p.atualizadoEm);
@@ -192,6 +211,7 @@ export default function RecirculacaoConsumo() {
   function novo() {
     setF(PADRAO);
     setProjetoId(null);
+    setCliente("");
     setNome("");
     snapshot.current = "";
     setSalvoEm(null);
@@ -754,13 +774,21 @@ export default function RecirculacaoConsumo() {
 
       {/* BARRA STICKY */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-900/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 py-3">
-          <input
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            placeholder="Nome do projeto (ex.: Casa Jerivá — Anel 01)"
-            className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60"
-          />
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 px-4 py-3">
+          <div className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-0">
+            <ClienteField
+              value={cliente}
+              onChange={setCliente}
+              sugestoes={clientesSug}
+              className="w-28 shrink-0 sm:w-40"
+            />
+            <input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Nome do cálculo (ex.: Anel 01)"
+              className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60"
+            />
+          </div>
           {projetoId && (
             <button
               onClick={novo}

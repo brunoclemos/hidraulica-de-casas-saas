@@ -16,6 +16,29 @@ export default function Dashboard() {
         </p>
       </div>
 
+      <Link
+        href="/clientes"
+        className="mb-5 flex items-center gap-3 rounded-2xl border border-amber/30 bg-ink-800 p-4 transition hover:border-amber/60"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber/15">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+              stroke="#FABA0D"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-base font-bold text-zinc-100">Clientes</span>
+          <span className="block text-[12px] text-zinc-500">
+            Cada cliente numa pasta, com todos os cálculos juntos. Abra e continue de onde parou.
+          </span>
+        </span>
+        <span className="text-zinc-600">→</span>
+      </Link>
+
       <div className="grid gap-3 sm:grid-cols-2">
         {MODULOS.map((m) => {
           const card = (

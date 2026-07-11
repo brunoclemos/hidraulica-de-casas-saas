@@ -28,9 +28,12 @@ import {
   listarProjetos,
   salvarProjeto,
   excluirProjeto,
+  buscarProjeto,
+  nomesClientes,
   tempoRelativo,
   Projeto,
 } from "@/lib/projetos";
+import { ClienteField } from "@/components/ClienteField";
 
 const MODULO = "caixa-boiler-solar";
 
@@ -127,15 +130,29 @@ export default function CaixaBoilerSolar() {
 
   // --- estado de salvamento ("Meus Projetos") ---
   const [projetoId, setProjetoId] = useState<string | null>(null);
+  const [cliente, setCliente] = useState("");
   const [nome, setNome] = useState("");
   const [estado, setEstado] = useState<EstadoSalvo>("nao-salvo");
   const [salvoEm, setSalvoEm] = useState<number | null>(null);
   const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [clientesSug, setClientesSug] = useState<string[]>([]);
   const snapshot = useRef<string>("");
 
-  const refresh = () => setProjetos(listarProjetos(MODULO));
+  const refresh = () => {
+    setProjetos(listarProjetos(MODULO));
+    setClientesSug(nomesClientes());
+  };
   useEffect(() => {
     refresh();
+  }, []);
+
+  // deep-link: /modulos/<slug>?projeto=<id> reabre o cálculo (vindo da tela de Clientes)
+  useEffect(() => {
+    const pid = new URLSearchParams(window.location.search).get("projeto");
+    if (!pid) return;
+    const p = buscarProjeto(pid);
+    if (p && p.modulo === MODULO) carregar(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // marca "não salvo" sempre que os inputs divergem do último snapshot salvo
@@ -153,6 +170,7 @@ export default function CaixaBoilerSolar() {
     const p = salvarProjeto<Form>({
       id: projetoId ?? undefined,
       modulo: MODULO,
+      cliente: cliente.trim() || undefined,
       nome: nome.trim() || "Sem nome",
       inputs: f,
     });
@@ -169,6 +187,7 @@ export default function CaixaBoilerSolar() {
     const merged = { ...PADRAO, ...(p.inputs as Partial<Form>) };
     setF(merged);
     setProjetoId(p.id);
+    setCliente(p.cliente ?? "");
     setNome(p.nome);
     // snapshot da forma MESCLADA (não dos inputs crus): senão um projeto antigo, sem o
     // campo novo, divergiria do estado e marcaria "não-salvo" sem o usuário mexer.
@@ -180,6 +199,7 @@ export default function CaixaBoilerSolar() {
   function novo() {
     setF(PADRAO);
     setProjetoId(null);
+    setCliente("");
     setNome("");
     snapshot.current = "";
     setEstado("nao-salvo");
@@ -601,13 +621,16 @@ export default function CaixaBoilerSolar() {
 
       {/* BARRA STICKY de salvar */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-900/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 py-3">
-          <input
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            placeholder="Nome do projeto (ex.: Casa Jerivá - Boiler)"
-            className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60"
-          />
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 px-4 py-3">
+          <div className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-0">
+            <ClienteField value={cliente} onChange={setCliente} sugestoes={clientesSug} className="w-28 shrink-0 sm:w-40" />
+            <input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Nome do cálculo (ex.: Boiler casa)"
+              className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60"
+            />
+          </div>
           {projetoId && (
             <button
               onClick={novo}

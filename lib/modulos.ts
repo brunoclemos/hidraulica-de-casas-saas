@@ -66,3 +66,14 @@ export const SLUGS_LIBERADOS = new Set(MODULOS.filter((m) => m.liberado).map((m)
 export function moduloLiberado(slug: string): boolean {
   return SLUGS_LIBERADOS.has(slug);
 }
+
+const POR_SLUG = new Map(MODULOS.map((m) => [m.slug, m]));
+
+/** Nome de exibição de um módulo pelo slug (fallback: o próprio slug). */
+export function moduloNome(slug: string): string {
+  return POR_SLUG.get(slug)?.nome ?? slug;
+}
+
+export function modulo(slug: string): Modulo | undefined {
+  return POR_SLUG.get(slug);
+}

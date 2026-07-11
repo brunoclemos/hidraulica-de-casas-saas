@@ -11,9 +11,17 @@ import { registrarEvento } from "./telemetria";
 export interface Projeto<T = unknown> {
   id: string;
   modulo: string;
+  cliente?: string; // "pasta do cliente" — agrupa cálculos de qualquer módulo. Vazio = avulso.
   nome: string;
   inputs: T;
   criadoEm: number;
+  atualizadoEm: number;
+}
+
+// Uma "pasta" na tela de Clientes: um cliente distinto + quantos cálculos tem e quando mexeu por último.
+export interface PastaCliente {
+  cliente: string; // "" = cálculos sem cliente ("Sem cliente")
+  qtd: number;
   atualizadoEm: number;
 }
 
@@ -51,6 +59,8 @@ function pushRemoto(p: Projeto) {
   if (!s) return;
   apiPost({ op: "upsert", email: s.email, projeto: p });
 }
+
+const normCliente = (c?: string) => (c || "").trim();
 
 function excluirRemoto(id: string) {
   apiPost({ op: "excluir", id });
@@ -106,21 +116,24 @@ export function listarProjetos(modulo?: string): Projeto[] {
 export function salvarProjeto<T>(p: {
   id?: string;
   modulo: string;
+  cliente?: string;
   nome: string;
   inputs: T;
 }): Projeto<T> {
   const list = read();
   const agora = Date.now();
+  const cliente = normCliente(p.cliente) || undefined;
   let salvo: Projeto<T>;
   const idx = p.id ? list.findIndex((x) => x.id === p.id) : -1;
   if (p.id && idx >= 0) {
-    list[idx] = { ...list[idx], nome: p.nome, inputs: p.inputs, atualizadoEm: agora };
+    list[idx] = { ...list[idx], cliente, nome: p.nome, inputs: p.inputs, atualizadoEm: agora };
     write(list);
     salvo = list[idx] as Projeto<T>;
   } else {
     salvo = {
       id: `p_${agora.toString(36)}_${Math.floor(performance.now()).toString(36)}`,
       modulo: p.modulo,
+      cliente,
       nome: p.nome,
       inputs: p.inputs,
       criadoEm: agora,
@@ -132,6 +145,67 @@ export function salvarProjeto<T>(p: {
   const s = getSessao();
   if (s) registrarEvento(s.email, "projeto_salvo", p.modulo);
   return salvo;
+}
+
+/** Um projeto por id (para o deep-link `?projeto=id` reabrir o cálculo no módulo certo). */
+export function buscarProjeto(id: string): Projeto | null {
+  return read().find((p) => p.id === id) ?? null;
+}
+
+/** Nomes de cliente já usados, únicos e ordenados — alimenta o autocomplete (datalist). */
+export function nomesClientes(): string[] {
+  const set = new Set<string>();
+  for (const p of read()) {
+    const c = normCliente(p.cliente);
+    if (c) set.add(c);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+/** Pastas por cliente (agregado), mais recentes primeiro. Inclui a pasta "" (sem cliente) se houver. */
+export function listarClientes(): PastaCliente[] {
+  const map = new Map<string, PastaCliente>();
+  for (const p of read()) {
+    const cliente = normCliente(p.cliente);
+    const atual = map.get(cliente) ?? { cliente, qtd: 0, atualizadoEm: 0 };
+    atual.qtd += 1;
+    if (p.atualizadoEm > atual.atualizadoEm) atual.atualizadoEm = p.atualizadoEm;
+    map.set(cliente, atual);
+  }
+  return Array.from(map.values()).sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+}
+
+/** Cálculos de uma pasta (todos os módulos), mais recentes primeiro. `""` = os sem cliente. */
+export function listarPorCliente(cliente: string): Projeto[] {
+  const alvo = normCliente(cliente);
+  return read()
+    .filter((p) => normCliente(p.cliente) === alvo)
+    .sort((a, b) => b.atualizadoEm - a.atualizadoEm);
+}
+
+/**
+ * Renomeia uma pasta: reetiqueta todos os cálculos daquele cliente e replica cada um.
+ * Renomear para "" esvazia o cliente (vira avulso). Retorna quantos foram afetados.
+ */
+export function renomearCliente(de: string, para: string): number {
+  const origem = normCliente(de);
+  const destino = normCliente(para);
+  if (origem === destino) return 0;
+  const agora = Date.now();
+  const list = read();
+  const afetados: Projeto[] = [];
+  for (const p of list) {
+    if (normCliente(p.cliente) === origem) {
+      p.cliente = destino || undefined;
+      p.atualizadoEm = agora;
+      afetados.push(p);
+    }
+  }
+  if (afetados.length) {
+    write(list);
+    for (const p of afetados) pushRemoto(p);
+  }
+  return afetados.length;
 }
 
 export function excluirProjeto(id: string) {

@@ -36,12 +36,14 @@ CREATE TABLE IF NOT EXISTS projetos (
   id TEXT PRIMARY KEY,             -- mesmo id do localStorage (p_...)
   email TEXT NOT NULL,
   modulo TEXT NOT NULL,
+  cliente TEXT,                    -- "pasta do cliente"; agrupa cálculos de qualquer módulo (NULL = avulso)
   nome TEXT NOT NULL,
   inputs TEXT NOT NULL,            -- JSON serializado
   criado_em INTEGER NOT NULL,      -- epoch ms (paridade com o app)
   atualizado_em INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS projetos_email_idx ON projetos (email, modulo);
+CREATE INDEX IF NOT EXISTS projetos_cliente_idx ON projetos (email, cliente);
 
 CREATE TABLE IF NOT EXISTS admins (
   email TEXT PRIMARY KEY,

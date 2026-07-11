@@ -8,12 +8,13 @@ export async function onRequestGet({ request, env }) {
   const email = (new URL(request.url).searchParams.get("email") || "").trim().toLowerCase();
   if (!emailValido(email)) return json({ erro: "email inválido" }, 400);
   const { results } = await env.DB.prepare(
-    `SELECT id, modulo, nome, inputs, criado_em, atualizado_em FROM projetos WHERE email = ?1`
+    `SELECT id, modulo, cliente, nome, inputs, criado_em, atualizado_em FROM projetos WHERE email = ?1`
   ).bind(email).all();
   return json(
     (results || []).map((r) => ({
       id: r.id,
       modulo: r.modulo,
+      cliente: r.cliente || undefined,
       nome: r.nome,
       inputs: JSON.parse(r.inputs),
       criadoEm: Number(r.criado_em),
@@ -43,12 +44,13 @@ export async function onRequestPost({ request, env }) {
     if (!emailValido(email) || !p.id || !p.modulo) return json({ erro: "dados inválidos" }, 400);
     const inputs = JSON.stringify(p.inputs ?? {});
     if (inputs.length > 200_000) return json({ erro: "projeto grande demais" }, 413);
+    const cliente = String(p.cliente || "").slice(0, 120);
     await env.DB.prepare(
-      `INSERT INTO projetos (id, email, modulo, nome, inputs, criado_em, atualizado_em)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-       ON CONFLICT(id) DO UPDATE SET nome = ?4, inputs = ?5, atualizado_em = ?7`
+      `INSERT INTO projetos (id, email, modulo, cliente, nome, inputs, criado_em, atualizado_em)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+       ON CONFLICT(id) DO UPDATE SET cliente = ?4, nome = ?5, inputs = ?6, atualizado_em = ?8`
     ).bind(
-      String(p.id).slice(0, 80), email, String(p.modulo).slice(0, 60),
+      String(p.id).slice(0, 80), email, String(p.modulo).slice(0, 60), cliente,
       String(p.nome || "Sem nome").slice(0, 200), inputs,
       Number(p.criadoEm) || Date.now(), Number(p.atualizadoEm) || Date.now()
     ).run();

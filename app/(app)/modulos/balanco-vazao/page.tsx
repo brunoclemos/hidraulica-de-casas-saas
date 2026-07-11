@@ -16,9 +16,12 @@ import {
   listarProjetos,
   salvarProjeto,
   excluirProjeto,
+  buscarProjeto,
+  nomesClientes,
   tempoRelativo,
   Projeto,
 } from "@/lib/projetos";
+import { ClienteField } from "@/components/ClienteField";
 
 const MODULO = "balanco-vazao";
 
@@ -48,14 +51,28 @@ export default function BalancoVazao() {
 
   // ---- estado de salvamento ("Meus Projetos") ----
   const [projetoId, setProjetoId] = useState<string | null>(null);
+  const [cliente, setCliente] = useState("");
+  const [clientesSug, setClientesSug] = useState<string[]>([]);
   const [nome, setNome] = useState("");
   const [estado, setEstado] = useState<EstadoSalvo>("nao-salvo");
   const [salvoEm, setSalvoEm] = useState<number | null>(null);
   const [projetos, setProjetos] = useState<Projeto[]>([]);
   const snapshot = useRef<string>("");
 
-  const refresh = () => setProjetos(listarProjetos(MODULO));
+  const refresh = () => {
+    setProjetos(listarProjetos(MODULO));
+    setClientesSug(nomesClientes());
+  };
   useEffect(() => { refresh(); }, []);
+
+  // deep-link: /modulos/<slug>?projeto=<id> reabre o cálculo (vindo da tela de Clientes)
+  useEffect(() => {
+    const pid = new URLSearchParams(window.location.search).get("projeto");
+    if (!pid) return;
+    const p = buscarProjeto(pid);
+    if (p && p.modulo === MODULO) carregar(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const atual = JSON.stringify(f);
@@ -65,14 +82,14 @@ export default function BalancoVazao() {
 
   function salvar() {
     setEstado("salvando");
-    const p = salvarProjeto<Form>({ id: projetoId ?? undefined, modulo: MODULO, nome: nome.trim() || "Sem nome", inputs: f });
+    const p = salvarProjeto<Form>({ id: projetoId ?? undefined, modulo: MODULO, cliente: cliente.trim() || undefined, nome: nome.trim() || "Sem nome", inputs: f });
     setProjetoId(p.id); setNome(p.nome); snapshot.current = JSON.stringify(f); setSalvoEm(p.atualizadoEm); setEstado("salvo"); refresh();
   }
   function carregar(p: Projeto) {
-    setF(p.inputs as Form); setProjetoId(p.id); setNome(p.nome); snapshot.current = JSON.stringify(p.inputs); setSalvoEm(p.atualizadoEm); setEstado("salvo");
+    setF(p.inputs as Form); setProjetoId(p.id); setCliente(p.cliente ?? ""); setNome(p.nome); snapshot.current = JSON.stringify(p.inputs); setSalvoEm(p.atualizadoEm); setEstado("salvo");
   }
   function novo() {
-    setF(PADRAO); setProjetoId(null); setNome(""); snapshot.current = ""; setSalvoEm(null); setEstado("nao-salvo");
+    setF(PADRAO); setProjetoId(null); setCliente(""); setNome(""); snapshot.current = ""; setSalvoEm(null); setEstado("nao-salvo");
   }
 
   const r = useMemo(() => calcular(f), [f]);
@@ -236,8 +253,11 @@ export default function BalancoVazao() {
 
       {/* BARRA STICKY */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-900/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 py-3">
-          <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome do projeto (ex.: Casa Jerivá — Balanço)" className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60" />
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 px-4 py-3">
+          <div className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-0">
+            <ClienteField value={cliente} onChange={setCliente} sugestoes={clientesSug} className="w-28 shrink-0 sm:w-40" />
+            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome do cálculo (ex.: Anel 01)" className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60" />
+          </div>
           {projetoId && (<button onClick={novo} className="rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400">Novo</button>)}
           <button onClick={salvar} className="rounded-xl bg-amber px-5 py-2.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-95">{projetoId ? "Atualizar" : "Salvar projeto"}</button>
         </div>

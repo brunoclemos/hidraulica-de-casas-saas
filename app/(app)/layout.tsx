@@ -63,6 +63,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Wordmark />
           </Link>
           <div className="flex items-center gap-3">
+            <Link
+              href="/clientes"
+              className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:border-amber/50 hover:text-amber"
+            >
+              Clientes
+            </Link>
             <span className="hidden text-xs text-zinc-500 sm:block">
               {sessao?.email}
             </span>
