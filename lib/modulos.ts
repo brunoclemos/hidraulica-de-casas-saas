@@ -58,6 +58,12 @@ export const MODULOS: Modulo[] = [
     desc: "Volume do vaso por NBR 16057 e Caleffi, lado a lado.",
     liberado: false,
   },
+  {
+    slug: "apoio-gas",
+    nome: "Apoio a Gás — Vazão & Seleção",
+    desc: "Vazão do sistema por 3 métodos (V.M.P, NBR 16057 e tempo determinado) e sugestão do aquecedor por custo × benefício.",
+    liberado: false,
+  },
 ];
 
 /** Slugs liberados (acesso público). */
