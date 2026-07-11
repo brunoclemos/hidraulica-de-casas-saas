@@ -60,7 +60,7 @@ export const MODULOS: Modulo[] = [
   },
   {
     slug: "apoio-gas",
-    nome: "Apoio a Gás — Vazão & Seleção",
+    nome: "Apoio à Gás — Vazão & Seleção",
     desc: "Vazão do sistema por 3 métodos (V.M.P, NBR 16057 e tempo determinado) e sugestão do aquecedor por custo × benefício.",
     liberado: false,
   },

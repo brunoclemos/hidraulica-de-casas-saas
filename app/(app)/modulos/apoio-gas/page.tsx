@@ -161,7 +161,7 @@ export default function ApoioGas() {
             ← Ferramentas
           </Link>
           <h1 className="mt-1 font-display text-xl font-bold text-zinc-100">
-            Apoio a Gás — Vazão &amp; Seleção
+            Apoio à Gás — Vazão &amp; Seleção
           </h1>
           <p className="text-sm text-zinc-400">
             Vazão do sistema por três métodos e sugestão do aquecedor por custo × benefício.
