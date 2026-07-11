@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { getSessao, logout, Sessao } from "@/lib/auth";
+import { getSessao, logout, ehAcessoInterno, Sessao } from "@/lib/auth";
 import { Wordmark } from "@/components/Brand";
 import { Marquee } from "@/components/Marquee";
 import { moduloLiberado } from "@/lib/modulos";
@@ -22,9 +22,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace("/login");
       return;
     }
-    // guard: módulo bloqueado acessado por link direto -> volta ao dashboard
+    // guard: módulo bloqueado acessado por link direto -> volta ao dashboard.
+    // Acesso interno (dono/dev/cliente) passa direto em qualquer módulo.
     const m = pathname?.match(/^\/modulos\/([^/]+)/);
-    if (m && !moduloLiberado(m[1])) {
+    if (m && !moduloLiberado(m[1]) && !ehAcessoInterno(s.email)) {
       router.replace("/dashboard");
       return;
     }

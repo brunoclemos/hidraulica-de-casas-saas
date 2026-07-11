@@ -1,10 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { BrandIcon } from "@/components/Brand";
 import { MODULOS } from "@/lib/modulos";
+import { ehAcessoInterno } from "@/lib/auth";
 
 export default function Dashboard() {
+  // Acesso interno (dono/dev/cliente) enxerga todos os módulos liberados. Lido no
+  // client (localStorage) via effect pra não quebrar a hidratação do export estático.
+  const [interno, setInterno] = useState(false);
+  useEffect(() => setInterno(ehAcessoInterno()), []);
+
   return (
     <div>
       <div className="mb-6">
@@ -41,10 +48,11 @@ export default function Dashboard() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         {MODULOS.map((m) => {
+          const disponivel = m.liberado || interno;
           const card = (
             <div
               className={`group relative h-full overflow-hidden rounded-2xl border p-5 transition ${
-                m.liberado
+                disponivel
                   ? "border-amber/30 bg-ink-800 hover:border-amber/60"
                   : "border-ink-700 bg-ink-800/40"
               }`}
@@ -54,8 +62,8 @@ export default function Dashboard() {
               </div>
               <div className="relative">
                 <div className="mb-3 flex items-center justify-between">
-                  <BrandIcon className="h-6 w-6" color={m.liberado ? "#FABA0D" : "#4A4A45"} />
-                  {m.liberado ? (
+                  <BrandIcon className="h-6 w-6" color={disponivel ? "#FABA0D" : "#4A4A45"} />
+                  {disponivel ? (
                     <span className="rounded-full bg-amber/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber">
                       Disponível
                     </span>
@@ -67,7 +75,7 @@ export default function Dashboard() {
                 </div>
                 <h2
                   className={`font-display text-base font-bold leading-tight ${
-                    m.liberado ? "text-zinc-100" : "text-zinc-400"
+                    disponivel ? "text-zinc-100" : "text-zinc-400"
                   }`}
                 >
                   {m.nome}
@@ -77,7 +85,7 @@ export default function Dashboard() {
             </div>
           );
 
-          return m.liberado ? (
+          return disponivel ? (
             <Link key={m.slug} href={`/modulos/${m.slug}`}>
               {card}
             </Link>

@@ -70,6 +70,16 @@ export async function login(email: string): Promise<{ ok: boolean; erro?: string
   }
 }
 
+/**
+ * True se o e-mail tem acesso interno (dono/dev/cliente): enxerga e abre TODOS os
+ * módulos, inclusive os ainda bloqueados como "Em breve" pro público. Sem argumento,
+ * usa a sessão atual. Serve pro cliente gravar as aulas com tudo liberado.
+ */
+export function ehAcessoInterno(email?: string | null): boolean {
+  const e = (email ?? getSessao()?.email ?? "").trim().toLowerCase();
+  return e !== "" && ACESSO_INTERNO.has(e);
+}
+
 export function getSessao(): Sessao | null {
   if (typeof window === "undefined") return null;
   try {

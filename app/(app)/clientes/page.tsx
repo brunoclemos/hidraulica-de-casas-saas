@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrandIcon } from "@/components/Brand";
 import { moduloNome, moduloLiberado } from "@/lib/modulos";
+import { ehAcessoInterno } from "@/lib/auth";
 import {
   listarClientes,
   listarPorCliente,
@@ -21,10 +22,12 @@ export default function ClientesPage() {
   const [aberta, setAberta] = useState<string | null>(null); // cliente da pasta aberta (null = lista de pastas)
   const [editando, setEditando] = useState(false);
   const [novoNome, setNovoNome] = useState("");
+  const [interno, setInterno] = useState(false); // acesso interno abre cálculo de qualquer módulo
 
   const refresh = () => setPastas(listarClientes());
   useEffect(() => {
     refresh();
+    setInterno(ehAcessoInterno());
   }, []);
 
   const itens = useMemo(
@@ -33,7 +36,7 @@ export default function ClientesPage() {
   );
 
   function abrirCalculo(p: Projeto) {
-    if (!moduloLiberado(p.modulo)) return;
+    if (!moduloLiberado(p.modulo) && !interno) return;
     router.push(`/modulos/${p.modulo}?projeto=${p.id}`);
   }
 
@@ -194,7 +197,7 @@ export default function ClientesPage() {
       ) : (
         <ul className="space-y-2">
           {itens.map((p) => {
-            const liberado = moduloLiberado(p.modulo);
+            const liberado = moduloLiberado(p.modulo) || interno;
             return (
               <li
                 key={p.id}
