@@ -328,6 +328,34 @@ export default function ApoioGas() {
         </p>
       </div>
 
+      {/* ATALHO — próximo passo do projeto: dimensionar o circulador */}
+      <Link
+        href="/modulos/circuladores"
+        className="flex items-center gap-3 rounded-2xl border border-amber/30 bg-ink-800 p-4 transition hover:border-amber/60"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber/15">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="12" cy="12" r="8" stroke="#FABA0D" strokeWidth="1.8" />
+            <path
+              d="M12 12l3.5-4.5M12 12l1.5 5.2M12 12l-5-1.5"
+              stroke="#FABA0D"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-base font-bold text-zinc-100">
+            Calcular circuladora
+          </span>
+          <span className="block text-[12px] text-zinc-500">
+            Abre o Cálculo de Circuladores para dimensionar a bomba de recirculação deste
+            projeto.
+          </span>
+        </span>
+        <span className="text-zinc-600">→</span>
+      </Link>
+
       {/* MEMÓRIAS DE CÁLCULO */}
       <div className="space-y-4">
         <Accordion title="Memória de cálculo — V.M.P">
