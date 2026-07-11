@@ -10,11 +10,19 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [erro, setErro] = useState<string | null>(null);
+  const [carregando, setCarregando] = useState(false);
 
-  function entrar(e: React.FormEvent) {
+  async function entrar(e: React.FormEvent) {
     e.preventDefault();
-    const r = login(email);
-    if (!r.ok) return setErro(r.erro || "Não foi possível entrar.");
+    if (carregando) return;
+    setCarregando(true);
+    setErro(null);
+    const r = await login(email);
+    if (!r.ok) {
+      setErro(r.erro || "Não foi possível entrar.");
+      setCarregando(false);
+      return;
+    }
     router.push("/dashboard");
   }
 
@@ -56,16 +64,17 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            className="mt-5 w-full rounded-xl bg-amber py-3.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 transition active:scale-[0.98]"
+            disabled={carregando}
+            className="mt-5 w-full rounded-xl bg-amber py-3.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 transition active:scale-[0.98] disabled:opacity-60"
           >
-            Entrar
+            {carregando ? "Verificando…" : "Entrar"}
           </button>
 
           <p className="mt-4 text-center text-[11px] leading-relaxed text-zinc-500">
-            Sua conta é liberada automaticamente ao adquirir o curso.
+            Use o mesmo e-mail da compra do curso.
             <br />
             <span className="text-zinc-600">
-              (Protótipo: qualquer e-mail válido entra)
+              Sua conta é liberada automaticamente ao adquirir o curso.
             </span>
           </p>
         </form>

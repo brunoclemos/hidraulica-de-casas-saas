@@ -5,8 +5,6 @@ import { BrandIcon } from "@/components/Brand";
 import { MODULOS } from "@/lib/modulos";
 
 export default function Dashboard() {
-  const liberados = MODULOS.filter((m) => m.liberado);
-
   return (
     <div>
       <div className="mb-6">
@@ -19,27 +17,53 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {liberados.map((m) => (
-          <Link key={m.slug} href={`/modulos/${m.slug}`}>
-            <div className="group relative h-full overflow-hidden rounded-2xl border border-amber/30 bg-ink-800 p-5 transition hover:border-amber/60">
+        {MODULOS.map((m) => {
+          const card = (
+            <div
+              className={`group relative h-full overflow-hidden rounded-2xl border p-5 transition ${
+                m.liberado
+                  ? "border-amber/30 bg-ink-800 hover:border-amber/60"
+                  : "border-ink-700 bg-ink-800/40"
+              }`}
+            >
               <div className="absolute -right-6 -top-6 opacity-[0.06]">
                 <BrandIcon className="h-24 w-24" color="#FABA0D" />
               </div>
               <div className="relative">
                 <div className="mb-3 flex items-center justify-between">
-                  <BrandIcon className="h-6 w-6" color="#FABA0D" />
-                  <span className="rounded-full bg-amber/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber">
-                    Disponível
-                  </span>
+                  <BrandIcon className="h-6 w-6" color={m.liberado ? "#FABA0D" : "#4A4A45"} />
+                  {m.liberado ? (
+                    <span className="rounded-full bg-amber/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber">
+                      Disponível
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-zinc-100/5 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      Em breve
+                    </span>
+                  )}
                 </div>
-                <h2 className="font-display text-base font-bold leading-tight text-zinc-100">
+                <h2
+                  className={`font-display text-base font-bold leading-tight ${
+                    m.liberado ? "text-zinc-100" : "text-zinc-400"
+                  }`}
+                >
                   {m.nome}
                 </h2>
-                <p className="mt-1.5 text-sm leading-snug text-zinc-400">{m.desc}</p>
+                <p className="mt-1.5 text-sm leading-snug text-zinc-500">{m.desc}</p>
               </div>
             </div>
-          </Link>
-        ))}
+          );
+
+          return m.liberado ? (
+            <Link key={m.slug} href={`/modulos/${m.slug}`}>
+              {card}
+            </Link>
+          ) : (
+            <div key={m.slug} className="cursor-not-allowed" aria-disabled title="Em breve">
+              {card}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
