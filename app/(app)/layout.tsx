@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { getSessao, logout, Sessao } from "@/lib/auth";
 import { Wordmark } from "@/components/Brand";
 import { Marquee } from "@/components/Marquee";
+import { moduloLiberado } from "@/lib/modulos";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [sessao, setSessao] = useState<Sessao | null>(null);
   const [pronto, setPronto] = useState(false);
 
@@ -18,9 +20,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace("/login");
       return;
     }
+    // guard: módulo bloqueado acessado por link direto -> volta ao dashboard
+    const m = pathname?.match(/^\/modulos\/([^/]+)/);
+    if (m && !moduloLiberado(m[1])) {
+      router.replace("/dashboard");
+      return;
+    }
     setSessao(s);
     setPronto(true);
-  }, [router]);
+  }, [router, pathname]);
 
   if (!pronto) {
     return (
