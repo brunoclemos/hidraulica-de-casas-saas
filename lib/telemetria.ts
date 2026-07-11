@@ -1,10 +1,19 @@
-// Telemetria de uso (alimenta o painel admin). Tudo fire-and-forget e no-op sem
-// Supabase configurado — nunca trava nem quebra a UI do aluno.
-
-import { supabase } from "./supabase";
+// Telemetria de uso (alimenta o painel admin). Fala com /api/telemetria (Pages
+// Function + banco D1, mesma origem). Fire-and-forget: nunca trava nem quebra a
+// UI do aluno; em ambiente sem a API (ex.: GitHub Pages) falha em silêncio.
 
 const SESSAO_TELEMETRIA_KEY = "hdc:sessao-telemetria";
 const PING_INTERVALO_MS = 60_000; // 1 ping/min com a aba visível => tempo na plataforma
+
+function post(body: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  void fetch("/api/telemetria", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => {});
+}
 
 /** Id aleatório estável por sessão de navegação (sessionStorage). */
 function sessaoId(): string {
@@ -17,22 +26,14 @@ function sessaoId(): string {
   return id;
 }
 
-/** Registra o login: upsert do usuário (último acesso) + linha de acesso. */
+/** Registra o login (atualiza último acesso + linha de acesso). */
 export function registrarLogin(email: string) {
-  const sb = supabase();
-  if (!sb) return;
-  void sb
-    .from("usuarios")
-    .upsert({ email, ultimo_acesso: new Date().toISOString() }, { onConflict: "email" })
-    .then(() => {});
-  void sb.from("acessos").insert({ email, sessao: sessaoId(), tipo: "login" }).then(() => {});
+  post({ acao: "login", email, sessao: sessaoId() });
 }
 
 /** Evento de uso (ex.: modulo_aberto, projeto_salvo). */
 export function registrarEvento(email: string, tipo: string, detalhe?: string) {
-  const sb = supabase();
-  if (!sb) return;
-  void sb.from("eventos").insert({ email, tipo, detalhe: detalhe ?? null }).then(() => {});
+  post({ acao: "evento", email, tipo, detalhe });
 }
 
 /**
@@ -40,11 +41,10 @@ export function registrarEvento(email: string, tipo: string, detalhe?: string) {
  * "tempo na plataforma" ≈ nº de pings × 1 min. Retorna função de cleanup.
  */
 export function iniciarHeartbeat(email: string): () => void {
-  const sb = supabase();
-  if (!sb || typeof window === "undefined") return () => {};
+  if (typeof window === "undefined") return () => {};
   const ping = () => {
     if (document.visibilityState !== "visible") return;
-    void sb.from("acessos").insert({ email, sessao: sessaoId(), tipo: "ping" }).then(() => {});
+    post({ acao: "ping", email, sessao: sessaoId() });
   };
   const timer = window.setInterval(ping, PING_INTERVALO_MS);
   return () => window.clearInterval(timer);

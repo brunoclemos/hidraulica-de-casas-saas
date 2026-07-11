@@ -1,10 +1,10 @@
-// "Meus Projetos" — localStorage como cache local + sincronização com Supabase.
-// A API síncrona continua a mesma (os módulos não mudam): toda escrita local dispara
-// uma replicação fire-and-forget pro banco, e `sincronizarProjetos()` (chamada no
-// layout, após o login) puxa os projetos do e-mail e mescla — o aluno troca de
-// aparelho e os cálculos estão lá. Sem Supabase configurado, é 100% localStorage.
+// "Meus Projetos" — localStorage como cache local + sincronização com /api/projetos
+// (Pages Function + banco D1, mesma origem). A API síncrona continua a mesma (os
+// módulos não mudam): toda escrita local dispara uma replicação fire-and-forget pro
+// banco, e `sincronizarProjetos()` (chamada no layout, após o login) puxa os projetos
+// do e-mail e mescla — o aluno troca de aparelho e os cálculos estão lá. Sem a API
+// (ex.: GitHub Pages), é 100% localStorage, sem quebrar nada.
 
-import { supabase } from "./supabase";
 import { getSessao } from "./auth";
 import { registrarEvento } from "./telemetria";
 
@@ -36,28 +36,24 @@ function write(list: Projeto[]) {
 // Replicação remota (fire-and-forget; nunca bloqueia a UI)
 // ---------------------------------------------------------------------------
 
+function apiPost(body: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  void fetch("/api/projetos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 function pushRemoto(p: Projeto) {
-  const sb = supabase();
   const s = getSessao();
-  if (!sb || !s) return;
-  void sb
-    .from("projetos")
-    .upsert({
-      id: p.id,
-      email: s.email,
-      modulo: p.modulo,
-      nome: p.nome,
-      inputs: p.inputs,
-      criado_em: p.criadoEm,
-      atualizado_em: p.atualizadoEm,
-    })
-    .then(() => {});
+  if (!s) return;
+  apiPost({ op: "upsert", email: s.email, projeto: p });
 }
 
 function excluirRemoto(id: string) {
-  const sb = supabase();
-  if (!sb) return;
-  void sb.from("projetos").delete().eq("id", id).then(() => {});
+  apiPost({ op: "excluir", id });
 }
 
 /**
@@ -66,22 +62,19 @@ function excluirRemoto(id: string) {
  * Chamar após o login (o layout faz isso). Retorna o nº de projetos após a mescla.
  */
 export async function sincronizarProjetos(): Promise<number> {
-  const sb = supabase();
   const s = getSessao();
-  if (!sb || !s) return read().length;
+  if (!s || typeof window === "undefined") return read().length;
 
-  const { data, error } = await sb.from("projetos").select("*").eq("email", s.email);
-  if (error || !data) return read().length;
+  let remotos: Projeto[];
+  try {
+    const res = await fetch(`/api/projetos?email=${encodeURIComponent(s.email)}`);
+    if (!res.ok) return read().length;
+    remotos = (await res.json()) as Projeto[];
+  } catch {
+    return read().length;
+  }
 
   const locais = new Map(read().map((p) => [p.id, p]));
-  const remotos: Projeto[] = data.map((r) => ({
-    id: r.id,
-    modulo: r.modulo,
-    nome: r.nome,
-    inputs: r.inputs,
-    criadoEm: Number(r.criado_em),
-    atualizadoEm: Number(r.atualizado_em),
-  }));
 
   // remoto → local (novo ou mais recente vence)
   for (const r of remotos) {

@@ -1,42 +1,32 @@
 "use client";
 
-// Painel ADMIN — restrito (Supabase Auth e-mail+senha; só os e-mails em ADMIN_EMAILS).
-// A proteção real é o RLS: as tabelas de telemetria só respondem SELECT para
-// usuários autenticados — e os únicos com conta são os admins.
+// Painel ADMIN — login com senha real (tabela admins no D1, verificada no servidor).
+// Todos os dados vêm de /api/admin/* com token assinado (12h); o navegador nunca
+// acessa o banco direto.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase, supabaseConfigurado } from "@/lib/supabase";
+import { useCallback, useEffect, useState } from "react";
 import { MODULOS } from "@/lib/modulos";
 import { Wordmark } from "@/components/Brand";
 
-const ADMIN_EMAILS = new Set(["brunoclemos1997@gmail.com", "contato@ferretoengenharia.com.br"]);
+const TOKEN_KEY = "hdc:admin-token";
 
-// -------------------------------- tipos -----------------------------------
-
+interface Cards {
+  total_alunos: number;
+  ativos7d: number;
+  logins_hoje: number;
+  tempo_min7d: number;
+}
+interface UsoRow { slug: string; n: number }
 interface UsuarioRow {
   email: string;
   nome: string | null;
   primeiro_acesso: string;
   ultimo_acesso: string;
+  logins30: number;
+  tempo_min30: number;
+  projetos: number;
 }
-interface AcessoRow {
-  email: string;
-  tipo: string;
-  criado_em: string;
-}
-interface EventoRow {
-  email: string;
-  tipo: string;
-  detalhe: string | null;
-  criado_em: string;
-}
-
-interface Dados {
-  usuarios: UsuarioRow[];
-  acessos: AcessoRow[];
-  eventos: EventoRow[];
-  projetosPorEmail: Map<string, number>;
-}
+interface Dados { cards: Cards; uso: UsoRow[]; usuarios: UsuarioRow[] }
 
 const NOME_MODULO = new Map(MODULOS.map((m) => [m.slug, m.nome]));
 
@@ -46,7 +36,7 @@ function fmtMin(min: number): string {
   return `${h}h ${String(min % 60).padStart(2, "0")}min`;
 }
 function fmtData(iso: string): string {
-  const d = new Date(iso);
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }) +
     " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
@@ -54,30 +44,22 @@ function fmtData(iso: string): string {
 // ------------------------------- página -----------------------------------
 
 export default function AdminPage() {
-  const [sessaoEmail, setSessaoEmail] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [email, setEmail] = useState<string>("");
   const [pronto, setPronto] = useState(false);
 
   useEffect(() => {
-    const sb = supabase();
-    if (!sb) {
-      setPronto(true);
-      return;
-    }
-    void sb.auth.getSession().then(({ data }) => {
-      setSessaoEmail(data.session?.user.email?.toLowerCase() ?? null);
-      setPronto(true);
-    });
+    setToken(sessionStorage.getItem(TOKEN_KEY));
+    setEmail(sessionStorage.getItem(TOKEN_KEY + ":email") || "");
+    setPronto(true);
   }, []);
 
-  if (!supabaseConfigurado) {
-    return (
-      <Casca>
-        <p className="text-sm text-zinc-400">
-          Painel ainda não configurado (falta conectar o banco de dados).
-        </p>
-      </Casca>
-    );
+  function sair() {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY + ":email");
+    location.reload();
   }
+
   if (!pronto) {
     return (
       <Casca>
@@ -85,18 +67,19 @@ export default function AdminPage() {
       </Casca>
     );
   }
-  if (!sessaoEmail) return <LoginAdmin onOk={(e) => setSessaoEmail(e)} />;
-  if (!ADMIN_EMAILS.has(sessaoEmail)) {
+  if (!token) {
     return (
-      <Casca>
-        <p className="text-sm text-red-400">Esta conta não tem acesso ao painel.</p>
-        <button onClick={() => supabase()?.auth.signOut().then(() => location.reload())} className="mt-4 rounded-xl border border-ink-600 px-4 py-2 text-sm text-zinc-300">
-          Sair
-        </button>
-      </Casca>
+      <LoginAdmin
+        onOk={(t, e) => {
+          sessionStorage.setItem(TOKEN_KEY, t);
+          sessionStorage.setItem(TOKEN_KEY + ":email", e);
+          setToken(t);
+          setEmail(e);
+        }}
+      />
     );
   }
-  return <Painel email={sessaoEmail} />;
+  return <Painel token={token} email={email} aoExpirar={sair} />;
 }
 
 function Casca({ children }: { children: React.ReactNode }) {
@@ -112,7 +95,7 @@ function Casca({ children }: { children: React.ReactNode }) {
 
 // ----------------------------- login admin ---------------------------------
 
-function LoginAdmin({ onOk }: { onOk: (email: string) => void }) {
+function LoginAdmin({ onOk }: { onOk: (token: string, email: string) => void }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState<string | null>(null);
@@ -122,14 +105,23 @@ function LoginAdmin({ onOk }: { onOk: (email: string) => void }) {
     e.preventDefault();
     setCarregando(true);
     setErro(null);
-    const sb = supabase()!;
-    const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password: senha });
-    if (error || !data.user?.email) {
-      setErro("E-mail ou senha inválidos.");
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), senha }),
+      });
+      if (!res.ok) {
+        setErro("E-mail ou senha inválidos.");
+        return;
+      }
+      const d = (await res.json()) as { token: string; email: string };
+      onOk(d.token, d.email);
+    } catch {
+      setErro("Falha de conexão. Tente novamente.");
+    } finally {
       setCarregando(false);
-      return;
     }
-    onOk(data.user.email.toLowerCase());
   }
 
   return (
@@ -161,30 +153,27 @@ function LoginAdmin({ onOk }: { onOk: (email: string) => void }) {
 
 type Aba = "geral" | "alunos" | "membros";
 
-function Painel({ email }: { email: string }) {
+function Painel({ token, email, aoExpirar }: { token: string; email: string; aoExpirar: () => void }) {
   const [aba, setAba] = useState<Aba>("geral");
   const [dados, setDados] = useState<Dados | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
-    const sb = supabase()!;
-    const desde = new Date(Date.now() - 30 * 86400_000).toISOString();
-    const [u, a, ev, pr] = await Promise.all([
-      sb.from("usuarios").select("*").order("ultimo_acesso", { ascending: false }),
-      sb.from("acessos").select("email,tipo,criado_em").gte("criado_em", desde).limit(50000),
-      sb.from("eventos").select("email,tipo,detalhe,criado_em").gte("criado_em", desde).limit(50000),
-      sb.from("projetos").select("email"),
-    ]);
-    if (u.error || a.error || ev.error || pr.error) {
-      setErro("Falha ao carregar os dados. Recarregue a página.");
-      return;
+    try {
+      const res = await fetch("/api/admin/dados", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401) {
+        aoExpirar();
+        return;
+      }
+      if (!res.ok) {
+        setErro("Falha ao carregar os dados. Recarregue a página.");
+        return;
+      }
+      setDados((await res.json()) as Dados);
+    } catch {
+      setErro("Falha de conexão ao carregar os dados.");
     }
-    const projetosPorEmail = new Map<string, number>();
-    for (const r of pr.data ?? []) {
-      projetosPorEmail.set(r.email, (projetosPorEmail.get(r.email) ?? 0) + 1);
-    }
-    setDados({ usuarios: u.data ?? [], acessos: a.data ?? [], eventos: ev.data ?? [], projetosPorEmail });
-  }, []);
+  }, [token, aoExpirar]);
 
   useEffect(() => { void carregar(); }, [carregar]);
 
@@ -198,7 +187,7 @@ function Painel({ email }: { email: string }) {
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden text-xs text-zinc-500 sm:block">{email}</span>
-            <button onClick={() => supabase()?.auth.signOut().then(() => location.reload())}
+            <button onClick={aoExpirar}
               className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200">
               Sair
             </button>
@@ -221,10 +210,10 @@ function Painel({ email }: { email: string }) {
         </div>
 
         {erro && <p className="text-sm text-red-400">{erro}</p>}
-        {!dados && !erro && <p className="text-sm text-zinc-500">Carregando dados…</p>}
+        {!dados && !erro && aba !== "membros" && <p className="text-sm text-zinc-500">Carregando dados…</p>}
         {dados && aba === "geral" && <VisaoGeral d={dados} />}
         {dados && aba === "alunos" && <TabelaAlunos d={dados} />}
-        {aba === "membros" && <Membros aoAdicionar={carregar} />}
+        {aba === "membros" && <Membros token={token} aoAdicionar={carregar} aoExpirar={aoExpirar} />}
       </main>
     </div>
   );
@@ -233,45 +222,31 @@ function Painel({ email }: { email: string }) {
 // ------------------------------ visão geral --------------------------------
 
 function VisaoGeral({ d }: { d: Dados }) {
-  const agora = Date.now();
-  const seteDias = agora - 7 * 86400_000;
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-
-  const ativos7d = new Set(d.acessos.filter((a) => new Date(a.criado_em).getTime() >= seteDias).map((a) => a.email)).size;
-  const loginsHoje = d.acessos.filter((a) => a.tipo === "login" && new Date(a.criado_em) >= hoje).length;
-  const tempo7dMin = d.acessos.filter((a) => a.tipo === "ping" && new Date(a.criado_em).getTime() >= seteDias).length;
-
-  const usoPorModulo = new Map<string, number>();
-  for (const e of d.eventos) {
-    if (e.tipo === "modulo_aberto" && e.detalhe) usoPorModulo.set(e.detalhe, (usoPorModulo.get(e.detalhe) ?? 0) + 1);
-  }
-  const uso = Array.from(usoPorModulo.entries()).sort((a, b) => b[1] - a[1]);
-  const maxUso = uso[0]?.[1] ?? 1;
-
+  const maxUso = d.uso[0]?.n ?? 1;
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Card titulo="Alunos que já entraram" valor={String(d.usuarios.length)} />
-        <Card titulo="Ativos (7 dias)" valor={String(ativos7d)} />
-        <Card titulo="Logins hoje" valor={String(loginsHoje)} />
-        <Card titulo="Tempo na plataforma (7d)" valor={fmtMin(tempo7dMin)} />
+        <Card titulo="Alunos que já entraram" valor={String(d.cards.total_alunos)} />
+        <Card titulo="Ativos (7 dias)" valor={String(d.cards.ativos7d)} />
+        <Card titulo="Logins hoje" valor={String(d.cards.logins_hoje)} />
+        <Card titulo="Tempo na plataforma (7d)" valor={fmtMin(d.cards.tempo_min7d)} />
       </div>
 
       <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
         <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
           Uso por ferramenta (30 dias)
         </h3>
-        {uso.length === 0 ? (
+        {d.uso.length === 0 ? (
           <p className="text-sm text-zinc-500">Sem eventos ainda.</p>
         ) : (
           <div className="space-y-2">
-            {uso.map(([slug, n]) => (
-              <div key={slug} className="flex items-center gap-3">
-                <div className="w-56 truncate text-[12px] text-zinc-300">{NOME_MODULO.get(slug) ?? slug}</div>
+            {d.uso.map((u) => (
+              <div key={u.slug} className="flex items-center gap-3">
+                <div className="w-56 truncate text-[12px] text-zinc-300">{NOME_MODULO.get(u.slug) ?? u.slug}</div>
                 <div className="h-3 flex-1 overflow-hidden rounded-full bg-ink-700">
-                  <div className="h-full rounded-full bg-amber" style={{ width: `${(n / maxUso) * 100}%` }} />
+                  <div className="h-full rounded-full bg-amber" style={{ width: `${(u.n / maxUso) * 100}%` }} />
                 </div>
-                <div className="w-12 text-right text-[12px] font-semibold text-zinc-200">{n}</div>
+                <div className="w-12 text-right text-[12px] font-semibold text-zinc-200">{u.n}</div>
               </div>
             ))}
           </div>
@@ -293,23 +268,6 @@ function Card({ titulo, valor }: { titulo: string; valor: string }) {
 // -------------------------------- alunos -----------------------------------
 
 function TabelaAlunos({ d }: { d: Dados }) {
-  const linhas = useMemo(() => {
-    const logins = new Map<string, number>();
-    const pings = new Map<string, number>();
-    for (const a of d.acessos) {
-      const m = a.tipo === "login" ? logins : a.tipo === "ping" ? pings : null;
-      if (m) m.set(a.email, (m.get(a.email) ?? 0) + 1);
-    }
-    return d.usuarios.map((u) => ({
-      email: u.email,
-      primeiro: u.primeiro_acesso,
-      ultimo: u.ultimo_acesso,
-      logins: logins.get(u.email) ?? 0,
-      tempoMin: pings.get(u.email) ?? 0,
-      projetos: d.projetosPorEmail.get(u.email) ?? 0,
-    }));
-  }, [d]);
-
   return (
     <div className="overflow-x-auto rounded-2xl border border-ink-700 bg-ink-800 p-4">
       <table className="w-full min-w-[640px] text-left text-[13px]">
@@ -324,17 +282,17 @@ function TabelaAlunos({ d }: { d: Dados }) {
           </tr>
         </thead>
         <tbody>
-          {linhas.map((l) => (
+          {d.usuarios.map((l) => (
             <tr key={l.email} className="border-t border-ink-700">
               <td className="py-2 pr-3 text-zinc-200">{l.email}</td>
-              <td className="py-2 text-right text-zinc-400">{fmtData(l.primeiro)}</td>
-              <td className="py-2 text-right text-zinc-300">{fmtData(l.ultimo)}</td>
-              <td className="py-2 text-right text-zinc-300">{l.logins}</td>
-              <td className="py-2 text-right text-zinc-300">{fmtMin(l.tempoMin)}</td>
+              <td className="py-2 text-right text-zinc-400">{fmtData(l.primeiro_acesso)}</td>
+              <td className="py-2 text-right text-zinc-300">{fmtData(l.ultimo_acesso)}</td>
+              <td className="py-2 text-right text-zinc-300">{l.logins30}</td>
+              <td className="py-2 text-right text-zinc-300">{fmtMin(l.tempo_min30)}</td>
               <td className="py-2 text-right text-zinc-300">{l.projetos}</td>
             </tr>
           ))}
-          {linhas.length === 0 && (
+          {d.usuarios.length === 0 && (
             <tr><td colSpan={6} className="py-4 text-center text-zinc-500">Nenhum acesso registrado ainda.</td></tr>
           )}
         </tbody>
@@ -345,7 +303,7 @@ function TabelaAlunos({ d }: { d: Dados }) {
 
 // ------------------------------- membros -----------------------------------
 
-function Membros({ aoAdicionar }: { aoAdicionar: () => void }) {
+function Membros({ token, aoAdicionar, aoExpirar }: { token: string; aoAdicionar: () => void; aoExpirar: () => void }) {
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -356,25 +314,24 @@ function Membros({ aoAdicionar }: { aoAdicionar: () => void }) {
     setEnviando(true);
     setMsg(null);
     try {
-      const sb = supabase()!;
-      const { data } = await sb.from("config").select("chave,valor").in("chave", ["webhook_add_aluno_url", "webhook_add_aluno_secret"]);
-      const cfg = new Map((data ?? []).map((r) => [r.chave, r.valor]));
-      const url = cfg.get("webhook_add_aluno_url");
-      const secret = cfg.get("webhook_add_aluno_secret");
-      if (!url) {
+      const res = await fetch("/api/admin/membros", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), nome: nome.trim() }),
+      });
+      if (res.status === 401) {
+        aoExpirar();
+        return;
+      }
+      if (res.status === 501) {
         setMsg({ ok: false, texto: "Webhook de adicionar aluno ainda não configurado." });
         return;
       }
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(secret ? { "x-hdc-secret": secret } : {}) },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), nome: nome.trim() }),
-      });
-      const corpo = (await res.json().catch(() => ({}))) as { ok?: boolean; jaExiste?: boolean };
       if (!res.ok) {
         setMsg({ ok: false, texto: "Falha ao adicionar. Tente novamente." });
         return;
       }
+      const corpo = (await res.json()) as { jaExiste?: boolean };
       setMsg({
         ok: true,
         texto: corpo.jaExiste

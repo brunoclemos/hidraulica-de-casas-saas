@@ -1,0 +1,13 @@
+# Config do Cloudflare Pages (projeto ferramentas-ferreto).
+# O deploy (`CLOUDFLARE=true npm run build && npx wrangler pages deploy`) publica o
+# site estático de /out + as Pages Functions de /functions (API), com o banco D1
+# vinculado como binding DB.
+
+name = "ferramentas-ferreto"
+compatibility_date = "2026-07-01"
+pages_build_output_dir = "out"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hidraulica-db"
+database_id = "9d3c040c-7b1d-4fa1-903d-a0b58db561f6"
