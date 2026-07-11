@@ -6,6 +6,12 @@
 const SESSAO_KEY = "hdc:sessao";
 const VALIDAR_URL = process.env.NEXT_PUBLIC_VALIDAR_ALUNO_URL || "";
 
+// Acesso interno (dono, dev, cliente, testers): entram sempre, sem precisar estar na
+// lista de compradores da Hotmart. Para adicionar alguém, inclua o e-mail (minúsculo) aqui.
+const ACESSO_INTERNO = new Set<string>([
+  "brunoclemos1997@gmail.com",
+]);
+
 export interface Sessao {
   email: string;
   nome: string;
@@ -28,6 +34,11 @@ export async function login(email: string): Promise<{ ok: boolean; erro?: string
   const e = email.trim().toLowerCase();
   if (!EMAIL_RE.test(e)) {
     return { ok: false, erro: "Digite um e-mail válido." };
+  }
+
+  // Acesso interno (dono/dev/cliente/testers): entra sempre.
+  if (ACESSO_INTERNO.has(e)) {
+    return { ok: true, sessao: criarSessao(e) };
   }
 
   // Sem webhook configurado (dev): aceita qualquer e-mail válido.
