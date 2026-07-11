@@ -7,6 +7,8 @@ import { getSessao, logout, Sessao } from "@/lib/auth";
 import { Wordmark } from "@/components/Brand";
 import { Marquee } from "@/components/Marquee";
 import { moduloLiberado } from "@/lib/modulos";
+import { iniciarHeartbeat, registrarEvento } from "@/lib/telemetria";
+import { sincronizarProjetos } from "@/lib/projetos";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -29,6 +31,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setSessao(s);
     setPronto(true);
   }, [router, pathname]);
+
+  // telemetria: heartbeat (tempo na plataforma) + sync inicial dos projetos
+  useEffect(() => {
+    const s = getSessao();
+    if (!s) return;
+    void sincronizarProjetos();
+    return iniciarHeartbeat(s.email);
+  }, []);
+
+  // telemetria: registra abertura de módulo
+  useEffect(() => {
+    const s = getSessao();
+    const m = pathname?.match(/^\/modulos\/([^/]+)/);
+    if (s && m && moduloLiberado(m[1])) registrarEvento(s.email, "modulo_aberto", m[1]);
+  }, [pathname]);
 
   if (!pronto) {
     return (

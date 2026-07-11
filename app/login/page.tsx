@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { login } from "@/lib/auth";
 import { BrandIcon } from "@/components/Brand";
 import { PipeFlow } from "@/components/PipeFlow";
+import { registrarLogin } from "@/lib/telemetria";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function LoginPage() {
       setCarregando(false);
       return;
     }
+    if (r.sessao) registrarLogin(r.sessao.email);
     router.push("/dashboard");
   }
 

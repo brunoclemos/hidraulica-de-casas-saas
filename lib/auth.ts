@@ -10,6 +10,7 @@ const VALIDAR_URL = process.env.NEXT_PUBLIC_VALIDAR_ALUNO_URL || "";
 // lista de compradores da Hotmart. Para adicionar alguém, inclua o e-mail (minúsculo) aqui.
 const ACESSO_INTERNO = new Set<string>([
   "brunoclemos1997@gmail.com",
+  "contato@ferretoengenharia.com.br",
 ]);
 
 export interface Sessao {
