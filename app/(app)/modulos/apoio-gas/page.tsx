@@ -593,7 +593,7 @@ function VazaoCard({ nome, sigla, lmin, p }: { nome: string; sigla: string; lmin
         <span className="ml-1 text-sm font-semibold text-zinc-400">l/min</span>
       </div>
       <div className="mt-1 text-[11px] text-zinc-500">{nome}</div>
-      <div className="text-[11px] text-zinc-500">{fmtKcal(p)}</div>
+      <div className="text-[11px] text-zinc-500">pot. útil {fmtKcal(p)}</div>
     </div>
   );
 }
