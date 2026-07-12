@@ -1,4 +1,4 @@
-// Motor de cálculo do módulo "Apoio à Gás — Vazão & Seleção".
+// Motor de cálculo do módulo "Apoio a Gás — Vazão & Seleção".
 // Portado da planilha "Ferreto_Vazao_Apoio_Gas - histerese.xlsx" (referencia/),
 // aba Cálculo (3 métodos, fiéis célula a célula) + aba Aquecedores (catálogo Rinnai).
 //

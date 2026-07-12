@@ -1,6 +1,6 @@
 # Planilhas de referência — fonte de verdade da ferramenta
 
-## Ferreto_Vazao_Apoio_Gas (Apoio à Gás — Vazão & Seleção)
+## Ferreto_Vazao_Apoio_Gas (Apoio a Gás — Vazão & Seleção)
 
 - **`Ferreto_Vazao_Apoio_Gas - histerese.xlsx`** ← usar esta. Fonte de verdade do módulo
   `apoio-gas` (`lib/calc/apoio-gas.ts`). Aba `Cálculo` = 3 métodos (V.M.P, NBR 16057 Anexo C,
