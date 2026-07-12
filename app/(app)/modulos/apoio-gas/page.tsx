@@ -665,7 +665,8 @@ function ArranjoLinha({ a, vencedor = false }: { a: Arranjo; vencedor?: boolean 
         </span>
       </div>
       <div className="mt-0.5 text-[11px] text-zinc-500">
-        pot. útil {nf(0).format(a.potUtilTotal)} kcal/h · folga {nf(0).format(a.folga)} kcal/h (
+        pot. nominal {nf(0).format(a.potNominalTotal)} kcal/h · pot. útil{" "}
+        {nf(0).format(a.potUtilTotal)} kcal/h · folga {nf(0).format(a.folga)} kcal/h (
         {nf(1).format(a.folgaPct * 100)}%)
         {a.numAparelhos > 1 ? ` · ${a.numAparelhos} aparelhos em paralelo` : ""}
       </div>
