@@ -143,7 +143,7 @@ export default function BalancoVazao() {
                   options={opcoesDN}
                 />
                 <NumberField
-                  label="Compr. total"
+                  label="Compr. ida e volta"
                   value={anel.comprimentoTotal}
                   onChange={(v) => setAnel(qual, { comprimentoTotal: v })}
                   unit="m"
@@ -151,12 +151,12 @@ export default function BalancoVazao() {
                   hint="Real + equivalente"
                 />
                 <NumberField
-                  label="Compr. real"
+                  label="Compr. ida"
                   value={anel.comprimentoReal}
                   onChange={(v) => setAnel(qual, { comprimentoReal: v })}
                   unit="m"
                   step={0.1}
-                  hint="Só tubo (p/ o tempo)"
+                  hint="Define o tempo"
                 />
                 <NumberField
                   label="Rugosidade"
@@ -188,13 +188,13 @@ export default function BalancoVazao() {
           <div className="rounded-2xl bg-ink-700 p-3">
             <div className="text-[11px] uppercase tracking-wider text-zinc-400">Anel 1</div>
             <div className="mt-0.5 font-display text-2xl font-bold text-amber">{num(r.q1)} <span className="text-sm">L/min</span></div>
-            <div className="mt-1 text-[12px] text-zinc-400">Recircula em <b className="text-zinc-200">{minSeg(r.tempo1Seg)}</b></div>
+            <div className="mt-1 text-[12px] text-zinc-400">Chega AQ em <b className="text-zinc-200">{minSeg(r.tempo1Seg)}</b></div>
             <div className="text-[11px] text-zinc-500">Volume {num(r.volume1)} L</div>
           </div>
           <div className="rounded-2xl bg-ink-700 p-3">
             <div className="text-[11px] uppercase tracking-wider text-zinc-400">Anel 2</div>
             <div className="mt-0.5 font-display text-2xl font-bold text-amber">{num(r.q2)} <span className="text-sm">L/min</span></div>
-            <div className="mt-1 text-[12px] text-zinc-400">Recircula em <b className="text-zinc-200">{minSeg(r.tempo2Seg)}</b></div>
+            <div className="mt-1 text-[12px] text-zinc-400">Chega AQ em <b className="text-zinc-200">{minSeg(r.tempo2Seg)}</b></div>
             <div className="text-[11px] text-zinc-500">Volume {num(r.volume2)} L</div>
           </div>
         </div>
