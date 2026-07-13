@@ -7,7 +7,10 @@
 //  - DIVISÃO DE VAZÃO: distribui a vazão do tronco entre dois anéis em paralelo, de modo
 //    que a perda de carga nos dois se iguale. Como f (atrito) depende da vazão, resolve-se
 //    por iteração de ponto fixo: Q1 = Qt · K1/(K1+K2), com Ki = Di^2.5 / √(fi · Li).
-//  - TEMPO DE RECIRCULAÇÃO por anel: volume interno (comprimento REAL) ÷ vazão do anel.
+//  - TEMPO DE RECIRCULAÇÃO por anel: volume interno do CAMINHO DE IDA ÷ vazão do anel.
+//    A ida é uma lista de trechos (comprimento + DN cada), porque o diâmetro muda ao
+//    longo do caminho (pedido do cliente, 12/07/2026 — consultoria dele). A vazão de
+//    cada trecho é a do próprio anel, puxada do balanço (nada digitado à mão).
 //  - MODO INVERSO: dado um tempo-alvo no Anel 2, acha a vazão necessária em cada anel
 //    (ambos com a mesma perda de carga) e a vazão total.
 //
@@ -92,12 +95,52 @@ function volumeLitros(dIntMm: number, comprimentoM: number): number {
 // TIPOS
 // ---------------------------------------------------------------------------
 
+/** Um trecho do caminho de ida (só volume/tempo — a divisão de vazão não usa isto). */
+export interface TrechoIda {
+  dnExterno: number; // mm — pode ser diferente do DN do anel (o diâmetro muda na ida)
+  comprimento: number; // m
+}
+
 export interface Anel {
   material: Material;
   dnExterno: number; // mm
   rugosidade: number; // mm (padrão 0,006)
-  comprimentoTotal: number; // m (real + equivalente) — usado na perda de carga / divisão
-  comprimentoReal: number; // m (só tubo) — usado no volume / tempo
+  comprimentoTotal: number; // m (ida e volta, real + equivalente) — perda de carga / divisão
+  trechosIda: TrechoIda[]; // caminho de ida em trechos — volume / tempo
+  /** LEGADO (projetos salvos antes de 13/07/2026): ida única no DN do anel. */
+  comprimentoReal?: number;
+}
+
+/**
+ * Migra um anel salvo no formato antigo (comprimentoReal único) para trechosIda.
+ * Projetos novos já vêm com trechosIda; nos antigos, vira 1 trecho no DN do anel
+ * (comportamento idêntico ao que era).
+ */
+export function normalizarAnel(anel: Anel): Anel {
+  if (Array.isArray(anel.trechosIda) && anel.trechosIda.length > 0) return anel;
+  const compr = anel.comprimentoReal ?? 0;
+  return { ...anel, trechosIda: [{ dnExterno: anel.dnExterno, comprimento: compr }] };
+}
+
+/** Detalhe por trecho de ida (pra UI): volume, tempo e velocidade na vazão do anel. */
+export interface TrechoIdaResultado {
+  dnInterno: number; // mm
+  volume: number; // L
+  tempoSeg: number; // s (volume / Q do anel)
+  velocidade: number; // m/s
+}
+
+export function detalharIda(anel: Anel, qLmin: number): TrechoIdaResultado[] {
+  return normalizarAnel(anel).trechosIda.map((t) => {
+    const dInt = dnInterno(anel.material, t.dnExterno);
+    const volume = volumeLitros(dInt, t.comprimento);
+    return {
+      dnInterno: dInt,
+      volume,
+      tempoSeg: qLmin > 0 ? (volume / qLmin) * 60 : 0,
+      velocidade: velocidade(qLmin, dInt),
+    };
+  });
 }
 
 export interface Inputs {
@@ -180,14 +223,21 @@ function vazaoNecessariaAnel1(inp: Inputs, hfAlvo: number): number {
 
 export function calcular(inp: Inputs): Resultado {
   const mu = viscosidade(inp.temperatura);
-  const d1 = dnInterno(inp.a1.material, inp.a1.dnExterno);
   const d2 = dnInterno(inp.a2.material, inp.a2.dnExterno);
 
   const { q1, q2 } = dividirVazao(inp);
 
-  const volume1 = volumeLitros(d1, inp.a1.comprimentoReal);
-  const volume2 = volumeLitros(d2, inp.a2.comprimentoReal);
-  // tempo de recirculação (s) = (volume_real / Q) em minutos × 60
+  // volume do caminho de ida = soma dos trechos (comprimento + DN cada)
+  const a1 = normalizarAnel(inp.a1);
+  const a2 = normalizarAnel(inp.a2);
+  const volumeIda = (a: Anel) =>
+    a.trechosIda.reduce(
+      (s, t) => s + volumeLitros(dnInterno(a.material, t.dnExterno), t.comprimento),
+      0
+    );
+  const volume1 = volumeIda(a1);
+  const volume2 = volumeIda(a2);
+  // tempo de recirculação (s) = (volume_ida / Q) em minutos × 60
   const tempo1Seg = q1 > 0 ? (volume1 / q1) * 60 : 0;
   const tempo2Seg = q2 > 0 ? (volume2 / q2) * 60 : 0;
 
@@ -210,11 +260,11 @@ export function calcular(inp: Inputs): Resultado {
   };
 }
 
-/** Formata segundos como "M min SS s". */
+/** Formata segundos como "M min SS s" (ou "SS s" quando < 1 min, igual à Purga). */
 export function minSeg(segundos: number): string {
   if (!Number.isFinite(segundos) || segundos <= 0) return "—";
   const s = Math.round(segundos);
+  if (s < 60) return `${s} s`;
   const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m} min ${String(r).padStart(2, "0")} s`;
+  return `${m} min ${String(s % 60).padStart(2, "0")} s`;
 }

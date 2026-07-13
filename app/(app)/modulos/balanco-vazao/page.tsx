@@ -5,8 +5,11 @@ import Link from "next/link";
 import {
   calcular,
   minSeg,
+  normalizarAnel,
+  detalharIda,
   Inputs,
   Anel,
+  TrechoIda,
   Material,
   DN_TABELA,
 } from "@/lib/calc/balanco-vazao";
@@ -28,8 +31,8 @@ const MODULO = "balanco-vazao";
 type Form = Inputs;
 
 const PADRAO: Form = {
-  a1: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 27.37, comprimentoReal: 15.52 },
-  a2: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 44.05, comprimentoReal: 31.9 },
+  a1: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 27.37, trechosIda: [{ dnExterno: 22, comprimento: 15.52 }] },
+  a2: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 44.05, trechosIda: [{ dnExterno: 22, comprimento: 31.9 }] },
   temperatura: 40,
   vazaoTotal: 6,
   tempoAlvoAnel2: 1,
@@ -48,6 +51,29 @@ export default function BalancoVazao() {
   const setAnel = (qual: "a1" | "a2", patch: Partial<Anel>) =>
     setF((p) => ({ ...p, [qual]: { ...p[qual], ...patch } }));
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  // trechos do caminho de ida (por anel)
+  const patchTrecho = (qual: "a1" | "a2", idx: number, patch: Partial<TrechoIda>) =>
+    setF((p) => ({
+      ...p,
+      [qual]: {
+        ...p[qual],
+        trechosIda: p[qual].trechosIda.map((t, i) => (i === idx ? { ...t, ...patch } : t)),
+      },
+    }));
+  const addTrecho = (qual: "a1" | "a2") =>
+    setF((p) => ({
+      ...p,
+      [qual]: {
+        ...p[qual],
+        trechosIda: [...p[qual].trechosIda, { dnExterno: p[qual].dnExterno, comprimento: 5 }],
+      },
+    }));
+  const removeTrecho = (qual: "a1" | "a2", idx: number) =>
+    setF((p) => ({
+      ...p,
+      [qual]: { ...p[qual], trechosIda: p[qual].trechosIda.filter((_, i) => i !== idx) },
+    }));
 
   // ---- estado de salvamento ("Meus Projetos") ----
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -86,7 +112,10 @@ export default function BalancoVazao() {
     setProjetoId(p.id); setNome(p.nome); snapshot.current = JSON.stringify(f); setSalvoEm(p.atualizadoEm); setEstado("salvo"); refresh();
   }
   function carregar(p: Projeto) {
-    setF(p.inputs as Form); setProjetoId(p.id); setCliente(p.cliente ?? ""); setNome(p.nome); snapshot.current = JSON.stringify(p.inputs); setSalvoEm(p.atualizadoEm); setEstado("salvo");
+    // projetos salvos antes dos trechos de ida têm comprimentoReal único — migra na carga
+    const bruto = p.inputs as Form;
+    const form: Form = { ...bruto, a1: normalizarAnel(bruto.a1), a2: normalizarAnel(bruto.a2) };
+    setF(form); setProjetoId(p.id); setCliente(p.cliente ?? ""); setNome(p.nome); snapshot.current = JSON.stringify(form); setSalvoEm(p.atualizadoEm); setEstado("salvo");
   }
   function novo() {
     setF(PADRAO); setProjetoId(null); setCliente(""); setNome(""); snapshot.current = ""; setSalvoEm(null); setEstado("nao-salvo");
@@ -119,6 +148,8 @@ export default function BalancoVazao() {
         {(["a1", "a2"] as const).map((qual, i) => {
           const anel = f[qual];
           const opcoesDN = DN_TABELA[anel.material].map((d) => ({ value: d.externo, label: d.rotulo }));
+          const qAnel = i === 0 ? r.q1 : r.q2;
+          const detalhes = detalharIda(anel, qAnel);
           return (
             <div key={qual} className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
               <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-amber">
@@ -151,20 +182,66 @@ export default function BalancoVazao() {
                   hint="Real + equivalente"
                 />
                 <NumberField
-                  label="Compr. ida"
-                  value={anel.comprimentoReal}
-                  onChange={(v) => setAnel(qual, { comprimentoReal: v })}
-                  unit="m"
-                  step={0.1}
-                  hint="Define o tempo"
-                />
-                <NumberField
                   label="Rugosidade"
                   value={anel.rugosidade}
                   onChange={(v) => setAnel(qual, { rugosidade: v })}
                   unit="mm"
                   step={0.001}
                 />
+              </div>
+
+              {/* CAMINHO DE IDA — trechos (o diâmetro muda ao longo da ida) */}
+              <div className="mt-4 rounded-xl border border-ink-600 bg-ink-900/40 p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-300">
+                    Caminho de ida
+                  </span>
+                  <span className="text-[10px] text-zinc-500">define o tempo e o volume</span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  Vazão automática do balanço:{" "}
+                  <b className="text-amber">{num(qAnel)} L/min</b>
+                </p>
+                <div className="mt-2 space-y-2">
+                  {anel.trechosIda.map((t, idx) => (
+                    <div key={idx} className="rounded-lg border border-ink-700 bg-ink-800 p-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <SelectField
+                          label={`DN trecho ${String(idx + 1).padStart(2, "0")}`}
+                          value={t.dnExterno}
+                          onChange={(v) => patchTrecho(qual, idx, { dnExterno: Number(v) })}
+                          options={opcoesDN}
+                        />
+                        <NumberField
+                          label="Comprimento"
+                          value={t.comprimento}
+                          onChange={(v) => patchTrecho(qual, idx, { comprimento: v })}
+                          unit="m"
+                          step={0.1}
+                        />
+                      </div>
+                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
+                        <span>
+                          {minSeg(detalhes[idx]?.tempoSeg ?? 0)} · {num(detalhes[idx]?.volume ?? 0)} L
+                        </span>
+                        {anel.trechosIda.length > 1 && (
+                          <button
+                            onClick={() => removeTrecho(qual, idx)}
+                            className="text-zinc-500 hover:text-red-400"
+                          >
+                            remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => addTrecho(qual)}
+                  className="mt-2 w-full rounded-lg border border-dashed border-ink-600 px-3 py-2 text-[12px] font-medium text-zinc-400 transition hover:border-amber/50 hover:text-amber"
+                >
+                  + Adicionar trecho
+                </button>
               </div>
             </div>
           );
