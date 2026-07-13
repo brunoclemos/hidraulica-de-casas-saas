@@ -11,6 +11,7 @@ export function NumberField({
   min,
   max,
   hint,
+  compact,
 }: {
   label: string;
   value: number;
@@ -20,6 +21,8 @@ export function NumberField({
   min?: number;
   max?: number;
   hint?: string;
+  /** Colunas estreitas (3 campos lado a lado em meia página): padding e fonte menores. */
+  compact?: boolean;
 }) {
   return (
     <label className="block">
@@ -33,9 +36,13 @@ export function NumberField({
           min={min}
           max={max}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="w-full bg-transparent px-3 py-3 text-base font-semibold text-zinc-100 outline-none"
+          className={`w-full bg-transparent font-semibold text-zinc-100 outline-none ${compact ? "px-2 py-2.5 text-sm" : "px-3 py-3 text-base"}`}
         />
-        {unit && <span className="px-3 text-sm font-medium text-zinc-500">{unit}</span>}
+        {unit && (
+          <span className={`font-medium text-zinc-500 ${compact ? "pr-2 text-[10px]" : "px-3 text-sm"}`}>
+            {unit}
+          </span>
+        )}
       </div>
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
     </label>
@@ -48,12 +55,15 @@ export function SelectField<T extends string | number>({
   onChange,
   options,
   hint,
+  compact,
 }: {
   label: string;
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string }[];
   hint?: string;
+  /** Colunas estreitas (3 campos lado a lado em meia página): padding e fonte menores. */
+  compact?: boolean;
 }) {
   return (
     <label className="block">
@@ -66,7 +76,7 @@ export function SelectField<T extends string | number>({
             const num = Number(raw);
             onChange((typeof value === "number" ? (num as T) : (raw as T)));
           }}
-          className="w-full appearance-none bg-transparent px-3 py-3 text-base font-semibold text-zinc-100 outline-none"
+          className={`w-full appearance-none bg-transparent font-semibold text-zinc-100 outline-none ${compact ? "px-2 py-2.5 text-sm" : "px-3 py-3 text-base"}`}
         >
           {options.map((o) => (
             <option key={String(o.value)} value={o.value} className="bg-ink-800">

@@ -99,6 +99,11 @@ function volumeLitros(dIntMm: number, comprimentoM: number): number {
 export interface TrechoIda {
   dnExterno: number; // mm — pode ser diferente do DN do anel (o diâmetro muda na ida)
   comprimento: number; // m
+  /**
+   * L/min — informada POR TRECHO (13/07/2026, vídeo do cliente): antes das derivações
+   * o trecho carrega a vazão total, não a do anel. Ausente (projeto legado) = vazão do anel.
+   */
+  vazao?: number;
 }
 
 export interface Anel {
@@ -122,23 +127,25 @@ export function normalizarAnel(anel: Anel): Anel {
   return { ...anel, trechosIda: [{ dnExterno: anel.dnExterno, comprimento: compr }] };
 }
 
-/** Detalhe por trecho de ida (pra UI): volume, tempo e velocidade na vazão do anel. */
+/** Detalhe por trecho de ida (pra UI): volume, tempo e velocidade na vazão do trecho. */
 export interface TrechoIdaResultado {
   dnInterno: number; // mm
   volume: number; // L
-  tempoSeg: number; // s (volume / Q do anel)
+  tempoSeg: number; // s (volume / vazão do trecho)
   velocidade: number; // m/s
 }
 
-export function detalharIda(anel: Anel, qLmin: number): TrechoIdaResultado[] {
+/** qAnelLmin só entra como fallback pra trecho legado sem vazão própria. */
+export function detalharIda(anel: Anel, qAnelLmin: number): TrechoIdaResultado[] {
   return normalizarAnel(anel).trechosIda.map((t) => {
     const dInt = dnInterno(anel.material, t.dnExterno);
     const volume = volumeLitros(dInt, t.comprimento);
+    const q = t.vazao ?? qAnelLmin;
     return {
       dnInterno: dInt,
       volume,
-      tempoSeg: qLmin > 0 ? (volume / qLmin) * 60 : 0,
-      velocidade: velocidade(qLmin, dInt),
+      tempoSeg: q > 0 ? (volume / q) * 60 : 0,
+      velocidade: velocidade(q, dInt),
     };
   });
 }
@@ -237,9 +244,11 @@ export function calcular(inp: Inputs): Resultado {
     );
   const volume1 = volumeIda(a1);
   const volume2 = volumeIda(a2);
-  // tempo de recirculação (s) = (volume_ida / Q) em minutos × 60
-  const tempo1Seg = q1 > 0 ? (volume1 / q1) * 60 : 0;
-  const tempo2Seg = q2 > 0 ? (volume2 / q2) * 60 : 0;
+  // tempo de recirculação (s) = soma dos trechos, cada um na SUA vazão
+  const tempoIda = (a: Anel, qAnel: number) =>
+    detalharIda(a, qAnel).reduce((s, t) => s + t.tempoSeg, 0);
+  const tempo1Seg = tempoIda(a1, q1);
+  const tempo2Seg = tempoIda(a2, q2);
 
   // modo inverso
   const t = inp.tempoAlvoAnel2;

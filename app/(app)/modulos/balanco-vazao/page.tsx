@@ -31,8 +31,8 @@ const MODULO = "balanco-vazao";
 type Form = Inputs;
 
 const PADRAO: Form = {
-  a1: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 27.37, trechosIda: [{ dnExterno: 22, comprimento: 15.52 }] },
-  a2: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 44.05, trechosIda: [{ dnExterno: 22, comprimento: 31.9 }] },
+  a1: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 27.37, trechosIda: [{ dnExterno: 22, comprimento: 15.52, vazao: 6 }] },
+  a2: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 44.05, trechosIda: [{ dnExterno: 22, comprimento: 31.9, vazao: 6 }] },
   temperatura: 40,
   vazaoTotal: 6,
   tempoAlvoAnel2: 1,
@@ -62,13 +62,20 @@ export default function BalancoVazao() {
       },
     }));
   const addTrecho = (qual: "a1" | "a2") =>
-    setF((p) => ({
-      ...p,
-      [qual]: {
-        ...p[qual],
-        trechosIda: [...p[qual].trechosIda, { dnExterno: p[qual].dnExterno, comprimento: 5 }],
-      },
-    }));
+    setF((p) => {
+      const trechos = p[qual].trechosIda;
+      const ultimo = trechos[trechos.length - 1];
+      return {
+        ...p,
+        [qual]: {
+          ...p[qual],
+          trechosIda: [
+            ...trechos,
+            { dnExterno: p[qual].dnExterno, comprimento: 5, vazao: ultimo?.vazao ?? p.vazaoTotal },
+          ],
+        },
+      };
+    });
   const removeTrecho = (qual: "a1" | "a2", idx: number) =>
     setF((p) => ({
       ...p,
@@ -114,7 +121,19 @@ export default function BalancoVazao() {
   function carregar(p: Projeto) {
     // projetos salvos antes dos trechos de ida têm comprimentoReal único — migra na carga
     const bruto = p.inputs as Form;
-    const form: Form = { ...bruto, a1: normalizarAnel(bruto.a1), a2: normalizarAnel(bruto.a2) };
+    let form: Form = { ...bruto, a1: normalizarAnel(bruto.a1), a2: normalizarAnel(bruto.a2) };
+    // salvos antes da vazão por trecho (13/07): materializa a vazão automática antiga (Q do anel)
+    const semVazao = (a: Anel) => a.trechosIda.some((t) => t.vazao == null);
+    if (semVazao(form.a1) || semVazao(form.a2)) {
+      const rr = calcular(form);
+      const preenche = (a: Anel, q: number): Anel => ({
+        ...a,
+        trechosIda: a.trechosIda.map((t) =>
+          t.vazao == null ? { ...t, vazao: Number(q.toFixed(2)) } : t
+        ),
+      });
+      form = { ...form, a1: preenche(form.a1, rr.q1), a2: preenche(form.a2, rr.q2) };
+    }
     setF(form); setProjetoId(p.id); setCliente(p.cliente ?? ""); setNome(p.nome); snapshot.current = JSON.stringify(form); setSalvoEm(p.atualizadoEm); setEstado("salvo");
   }
   function novo() {
@@ -199,25 +218,37 @@ export default function BalancoVazao() {
                   <span className="text-[10px] text-zinc-500">define o tempo e o volume</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-zinc-500">
-                  Vazão automática do balanço:{" "}
-                  <b className="text-amber">{num(qAnel)} L/min</b>
+                  Antes da derivação o trecho carrega a vazão total — informe a vazão de cada um.
                 </p>
                 <div className="mt-2 space-y-2">
                   {anel.trechosIda.map((t, idx) => (
                     <div key={idx} className="rounded-lg border border-ink-700 bg-ink-800 p-2">
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        Trecho {String(idx + 1).padStart(2, "0")}
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-3 gap-2">
+                        <NumberField
+                          label="Vazão"
+                          value={t.vazao ?? qAnel}
+                          onChange={(v) => patchTrecho(qual, idx, { vazao: v })}
+                          unit="L/min"
+                          step={0.1}
+                          compact
+                        />
                         <SelectField
-                          label={`DN trecho ${String(idx + 1).padStart(2, "0")}`}
+                          label="DN"
                           value={t.dnExterno}
                           onChange={(v) => patchTrecho(qual, idx, { dnExterno: Number(v) })}
                           options={opcoesDN}
+                          compact
                         />
                         <NumberField
-                          label="Comprimento"
+                          label="Compr."
                           value={t.comprimento}
                           onChange={(v) => patchTrecho(qual, idx, { comprimento: v })}
                           unit="m"
                           step={0.1}
+                          compact
                         />
                       </div>
                       <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
