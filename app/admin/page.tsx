@@ -109,10 +109,19 @@ function LoginAdmin({ onOk }: { onOk: (token: string, email: string) => void }) 
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), senha }),
+        // trim na senha: espaço/quebra de linha de colagem era 401 silencioso
+        body: JSON.stringify({ email: email.trim(), senha: senha.trim() }),
       });
+      if (res.status === 401) {
+        setErro(
+          "E-mail ou senha inválidos. Se o navegador preencheu sozinho, apague o campo e digite a senha atual à mão."
+        );
+        return;
+      }
       if (!res.ok) {
-        setErro("E-mail ou senha inválidos.");
+        setErro(
+          "Servidor indisponível neste endereço. Acesse pelo domínio oficial: ferramentas.ferretoengenharia.com.br/admin"
+        );
         return;
       }
       const d = (await res.json()) as { token: string; email: string };
@@ -136,7 +145,8 @@ function LoginAdmin({ onOk }: { onOk: (token: string, email: string) => void }) 
         </label>
         <label className="block">
           <span className="field-label">Senha</span>
-          <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
+          {/* new-password: impede o Chrome de preencher senha antiga salva (causa de 401 fantasma) */}
+          <input type="password" autoComplete="new-password" value={senha} onChange={(e) => setSenha(e.target.value)}
             className="mt-1 w-full rounded-xl border border-ink-600 bg-ink-800 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-amber/60" />
         </label>
         {erro && <p className="text-xs text-red-400">{erro}</p>}
