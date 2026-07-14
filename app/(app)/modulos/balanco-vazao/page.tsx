@@ -10,6 +10,7 @@ import {
   Inputs,
   Anel,
   TrechoIda,
+  FonteVazao,
   Material,
   DN_TABELA,
 } from "@/lib/calc/balanco-vazao";
@@ -31,8 +32,8 @@ const MODULO = "balanco-vazao";
 type Form = Inputs;
 
 const PADRAO: Form = {
-  a1: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 27.37, trechosIda: [{ dnExterno: 22, comprimento: 15.52, vazao: 6 }] },
-  a2: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 44.05, trechosIda: [{ dnExterno: 22, comprimento: 31.9, vazao: 6 }] },
+  a1: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 27.37, trechosIda: [{ dnExterno: 22, comprimento: 15.52, fonteVazao: "tronco" }] },
+  a2: { material: "CPVC", dnExterno: 22, rugosidade: 0.006, comprimentoTotal: 44.05, trechosIda: [{ dnExterno: 22, comprimento: 31.9, fonteVazao: "tronco" }] },
   temperatura: 40,
   vazaoTotal: 6,
   tempoAlvoAnel2: 1,
@@ -41,6 +42,12 @@ const PADRAO: Form = {
 const opcoesMaterial: { value: Material; label: string }[] = [
   { value: "CPVC", label: "CPVC" },
   { value: "PVC", label: "PVC" },
+];
+
+const opcoesFonte: { value: FonteVazao; label: string }[] = [
+  { value: "tronco", label: "Tronco" },
+  { value: "braco", label: "Braço" },
+  { value: "manual", label: "Manual" },
 ];
 
 const num = (x: number, n = 2) => (Number.isFinite(x) ? x.toFixed(n) : "—");
@@ -61,21 +68,18 @@ export default function BalancoVazao() {
         trechosIda: p[qual].trechosIda.map((t, i) => (i === idx ? { ...t, ...patch } : t)),
       },
     }));
+  // trecho novo entra no fim da ida = depois da derivação → braço
   const addTrecho = (qual: "a1" | "a2") =>
-    setF((p) => {
-      const trechos = p[qual].trechosIda;
-      const ultimo = trechos[trechos.length - 1];
-      return {
-        ...p,
-        [qual]: {
-          ...p[qual],
-          trechosIda: [
-            ...trechos,
-            { dnExterno: p[qual].dnExterno, comprimento: 5, vazao: ultimo?.vazao ?? p.vazaoTotal },
-          ],
-        },
-      };
-    });
+    setF((p) => ({
+      ...p,
+      [qual]: {
+        ...p[qual],
+        trechosIda: [
+          ...p[qual].trechosIda,
+          { dnExterno: p[qual].dnExterno, comprimento: 5, fonteVazao: "braco" as const },
+        ],
+      },
+    }));
   const removeTrecho = (qual: "a1" | "a2", idx: number) =>
     setF((p) => ({
       ...p,
@@ -122,18 +126,15 @@ export default function BalancoVazao() {
     // projetos salvos antes dos trechos de ida têm comprimentoReal único — migra na carga
     const bruto = p.inputs as Form;
     let form: Form = { ...bruto, a1: normalizarAnel(bruto.a1), a2: normalizarAnel(bruto.a2) };
-    // salvos antes da vazão por trecho (13/07): materializa a vazão automática antiga (Q do anel)
-    const semVazao = (a: Anel) => a.trechosIda.some((t) => t.vazao == null);
-    if (semVazao(form.a1) || semVazao(form.a2)) {
-      const rr = calcular(form);
-      const preenche = (a: Anel, q: number): Anel => ({
-        ...a,
-        trechosIda: a.trechosIda.map((t) =>
-          t.vazao == null ? { ...t, vazao: Number(q.toFixed(2)) } : t
-        ),
-      });
-      form = { ...form, a1: preenche(form.a1, rr.q1), a2: preenche(form.a2, rr.q2) };
-    }
+    // salvos antes da TAG (13/07 tarde): vazão digitada vira "manual" (preserva o número),
+    // sem vazão vira "braço" (= vazão automática de antes, resultado idêntico)
+    const migra = (a: Anel): Anel => ({
+      ...a,
+      trechosIda: a.trechosIda.map((t) =>
+        t.fonteVazao ? t : { ...t, fonteVazao: t.vazao != null ? ("manual" as const) : ("braco" as const) }
+      ),
+    });
+    form = { ...form, a1: migra(form.a1), a2: migra(form.a2) };
     setF(form); setProjetoId(p.id); setCliente(p.cliente ?? ""); setNome(p.nome); snapshot.current = JSON.stringify(form); setSalvoEm(p.atualizadoEm); setEstado("salvo");
   }
   function novo() {
@@ -168,7 +169,7 @@ export default function BalancoVazao() {
           const anel = f[qual];
           const opcoesDN = DN_TABELA[anel.material].map((d) => ({ value: d.externo, label: d.rotulo }));
           const qAnel = i === 0 ? r.q1 : r.q2;
-          const detalhes = detalharIda(anel, qAnel);
+          const detalhes = detalharIda(anel, qAnel, f.vazaoTotal);
           return (
             <div key={qual} className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
               <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-amber">
@@ -218,7 +219,8 @@ export default function BalancoVazao() {
                   <span className="text-[10px] text-zinc-500">define o tempo e o volume</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-zinc-500">
-                  Antes da derivação o trecho carrega a vazão total — informe a vazão de cada um.
+                  Tronco <b className="text-amber">{num(f.vazaoTotal)}</b> · Braço deste anel{" "}
+                  <b className="text-amber">{num(qAnel)}</b> L/min — a TAG puxa sozinha.
                 </p>
                 <div className="mt-2 space-y-2">
                   {anel.trechosIda.map((t, idx) => (
@@ -227,12 +229,20 @@ export default function BalancoVazao() {
                         Trecho {String(idx + 1).padStart(2, "0")}
                       </div>
                       <div className="mt-1.5 grid grid-cols-3 gap-2">
-                        <NumberField
+                        <SelectField
                           label="Vazão"
-                          value={t.vazao ?? qAnel}
-                          onChange={(v) => patchTrecho(qual, idx, { vazao: v })}
-                          unit="L/min"
-                          step={0.1}
+                          value={t.fonteVazao ?? (t.vazao != null ? "manual" : "braco")}
+                          onChange={(v) => {
+                            const fonte = v as FonteVazao;
+                            patchTrecho(qual, idx, {
+                              fonteVazao: fonte,
+                              // ao virar manual, parte da vazão que corria no trecho
+                              ...(fonte === "manual" && t.vazao == null
+                                ? { vazao: Number((detalhes[idx]?.vazaoUsada ?? qAnel).toFixed(2)) }
+                                : {}),
+                            });
+                          }}
+                          options={opcoesFonte}
                           compact
                         />
                         <SelectField
@@ -251,9 +261,21 @@ export default function BalancoVazao() {
                           compact
                         />
                       </div>
+                      {(t.fonteVazao ?? (t.vazao != null ? "manual" : "braco")) === "manual" && (
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          <NumberField
+                            label="Vazão manual"
+                            value={t.vazao ?? 0}
+                            onChange={(v) => patchTrecho(qual, idx, { vazao: v })}
+                            unit="L/min"
+                            step={0.1}
+                            compact
+                          />
+                        </div>
+                      )}
                       <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
                         <span>
-                          {minSeg(detalhes[idx]?.tempoSeg ?? 0)} · {num(detalhes[idx]?.volume ?? 0)} L
+                          {num(detalhes[idx]?.vazaoUsada ?? 0)} L/min · {minSeg(detalhes[idx]?.tempoSeg ?? 0)} · {num(detalhes[idx]?.volume ?? 0)} L
                         </span>
                         {anel.trechosIda.length > 1 && (
                           <button

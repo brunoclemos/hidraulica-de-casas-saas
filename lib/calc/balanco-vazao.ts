@@ -95,15 +95,29 @@ function volumeLitros(dIntMm: number, comprimentoM: number): number {
 // TIPOS
 // ---------------------------------------------------------------------------
 
+/**
+ * De onde vem a vazão do trecho (TAG, 13/07/2026 tarde — 2º vídeo do cliente):
+ * "tronco" = vazão total do tronco; "braco" = vazão calculada do próprio anel;
+ * "manual" = digitada. Tronco/braço acompanham o balanço ao vivo — mudou a vazão
+ * total, os trechos atualizam sozinhos.
+ */
+export type FonteVazao = "tronco" | "braco" | "manual";
+
 /** Um trecho do caminho de ida (só volume/tempo — a divisão de vazão não usa isto). */
 export interface TrechoIda {
   dnExterno: number; // mm — pode ser diferente do DN do anel (o diâmetro muda na ida)
   comprimento: number; // m
-  /**
-   * L/min — informada POR TRECHO (13/07/2026, vídeo do cliente): antes das derivações
-   * o trecho carrega a vazão total, não a do anel. Ausente (projeto legado) = vazão do anel.
-   */
+  /** Ausente (legado) = braço se não houver vazão digitada. */
+  fonteVazao?: FonteVazao;
+  /** L/min — usada quando fonteVazao === "manual" (ou legado sem fonte). */
   vazao?: number;
+}
+
+/** Resolve a vazão (L/min) que corre no trecho. */
+export function vazaoTrecho(t: TrechoIda, qAnel: number, qTronco: number): number {
+  if (t.fonteVazao === "tronco") return qTronco;
+  if (t.fonteVazao === "braco") return qAnel;
+  return t.vazao ?? qAnel; // manual — ou legado: número digitado, senão braço
 }
 
 export interface Anel {
@@ -133,19 +147,20 @@ export interface TrechoIdaResultado {
   volume: number; // L
   tempoSeg: number; // s (volume / vazão do trecho)
   velocidade: number; // m/s
+  vazaoUsada: number; // L/min (resolvida pela TAG)
 }
 
-/** qAnelLmin só entra como fallback pra trecho legado sem vazão própria. */
-export function detalharIda(anel: Anel, qAnelLmin: number): TrechoIdaResultado[] {
+export function detalharIda(anel: Anel, qAnelLmin: number, qTroncoLmin: number): TrechoIdaResultado[] {
   return normalizarAnel(anel).trechosIda.map((t) => {
     const dInt = dnInterno(anel.material, t.dnExterno);
     const volume = volumeLitros(dInt, t.comprimento);
-    const q = t.vazao ?? qAnelLmin;
+    const q = vazaoTrecho(t, qAnelLmin, qTroncoLmin);
     return {
       dnInterno: dInt,
       volume,
       tempoSeg: q > 0 ? (volume / q) * 60 : 0,
       velocidade: velocidade(q, dInt),
+      vazaoUsada: q,
     };
   });
 }
@@ -246,7 +261,7 @@ export function calcular(inp: Inputs): Resultado {
   const volume2 = volumeIda(a2);
   // tempo de recirculação (s) = soma dos trechos, cada um na SUA vazão
   const tempoIda = (a: Anel, qAnel: number) =>
-    detalharIda(a, qAnel).reduce((s, t) => s + t.tempoSeg, 0);
+    detalharIda(a, qAnel, inp.vazaoTotal).reduce((s, t) => s + t.tempoSeg, 0);
   const tempo1Seg = tempoIda(a1, q1);
   const tempo2Seg = tempoIda(a2, q2);
 
