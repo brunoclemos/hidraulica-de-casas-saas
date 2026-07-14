@@ -302,8 +302,8 @@ export default function ApoioGas() {
           )}
         </div>
         <p className="mb-4 text-[11px] leading-relaxed text-zinc-500">
-          Sugestão de custo–benefício com base nos preços informados (arranjos podem misturar
-          modelos e usar quantos aparelhos forem necessários, em paralelo). A decisão final é
+          Sugestão de custo–benefício com base nos preços informados — sempre o mesmo modelo,
+          em paralelo (sistemas gêmeos: se um aparelho parar, o outro segura). A decisão final é
           do projetista.
         </p>
 

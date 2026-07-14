@@ -3,8 +3,10 @@
 // aba Cálculo (3 métodos, fiéis célula a célula) + aba Aquecedores (catálogo Rinnai).
 //
 // O painel de seleção da planilha (só 1× ou 2× iguais) foi substituído, a pedido do
-// cliente, por um otimizador de custo × benefício: arranjos MISTOS, 3+ aparelhos e
-// preços editáveis. As fórmulas físicas dos métodos continuam idênticas à planilha.
+// cliente, por um otimizador de custo × benefício com preços editáveis. Desde 14/07/2026
+// (pedido do cliente) os arranjos são SEMPRE do mesmo modelo, N× em paralelo — sistemas
+// gêmeos: se um aparelho parar, o outro segura, e a manutenção fica intercambiável.
+// As fórmulas físicas dos métodos continuam idênticas à planilha.
 //
 // Fórmulas portadas FIELMENTE das células (defaults entre parênteses):
 //   ΔT   B21 = TAQ − TAF                                          (30)
@@ -206,11 +208,9 @@ export function calcular(i: Inputs): Resultado {
 }
 
 // === Otimizador de arranjos (substitui o painel travado da planilha) =====
-// Menor preço total de um multiset de aquecedores (modelos mistos, repetição
-// permitida, sem teto de 2) cuja pot. útil somada cobre a demanda. Enumeração
-// exaustiva com poda — preços são editáveis (floats arbitrários), o que
-// inviabiliza guloso/DP; o espaço é minúsculo (8 modelos, cap 12 → ~126k nós
-// no pior caso, <500 nos reais). Desempate determinístico:
+// SEMPRE o mesmo modelo, N× em paralelo (14/07/2026, pedido do cliente — sistemas
+// gêmeos). Por modelo: N = ⌈demanda / pot. útil⌉; mais unidades que N nunca ajudam
+// (só encarecem), então cada modelo gera exatamente 1 candidato. Desempate:
 //   1) menor preço  2) menos aparelhos (custo oculto de instalação/gás/exaustão)
 //   3) maior pot. útil (folga de graça)  4) ordem do catálogo.
 
@@ -280,60 +280,24 @@ export function sugerirArranjos(
     return { status: "demanda-excede-cap", arranjos: [], modelosIgnorados };
   }
 
-  // Enumeração de multisets: qtd por modelo, recursiva, com poda por
-  // inviabilidade (nem enchendo o restante com o modelo mais potente cobre).
-  const ordenados = [...validos].sort((a, b) => potUtil(b) - potUtil(a));
+  // 1 candidato por modelo: a menor quantidade que cobre a demanda.
   const posCatalogo = new Map(catalogo.map((m, k) => [m.id, k]));
   const encontrados: Arranjo[] = [];
-  const qtds = new Array<number>(ordenados.length).fill(0);
-
-  function registrar() {
-    const itens: ItemArranjo[] = [];
-    let n = 0;
-    let util = 0;
-    let nominal = 0;
-    let preco = 0;
-    for (let j = 0; j < ordenados.length; j++) {
-      if (qtds[j] === 0) continue;
-      const m = ordenados[j];
-      itens.push({ modeloId: m.id, qtd: qtds[j] });
-      n += qtds[j];
-      util += qtds[j] * potUtil(m);
-      nominal += qtds[j] * m.potNominalKcalH;
-      preco += qtds[j] * precoEfetivo(m, opts.precos);
-    }
-    // exibição na ordem do catálogo (E10 → E43), não por potência
-    itens.sort((x, y) => (posCatalogo.get(x.modeloId) ?? 99) - (posCatalogo.get(y.modeloId) ?? 99));
+  for (const m of validos) {
+    // tolerância p/ igualdade exata em float (demanda == N × pot. útil)
+    const qtd = Math.ceil((pKcalH - 1e-9) / potUtil(m));
+    if (qtd > maxAparelhos) continue;
+    const util = qtd * potUtil(m);
     encontrados.push({
-      itens,
-      numAparelhos: n,
+      itens: [{ modeloId: m.id, qtd }],
+      numAparelhos: qtd,
       potUtilTotal: util,
-      potNominalTotal: nominal,
-      precoTotal: preco,
+      potNominalTotal: qtd * m.potNominalKcalH,
+      precoTotal: qtd * precoEfetivo(m, opts.precos),
       folga: util - pKcalH,
       folgaPct: (util - pKcalH) / pKcalH,
     });
   }
-
-  function busca(idx: number, usados: number, utilAcum: number) {
-    const deficit = pKcalH - utilAcum - 1e-9; // tolerância p/ igualdade exata em float
-    if (deficit <= 0) {
-      registrar();
-      return; // já cobre — adicionar mais aparelhos só piora (dominado)
-    }
-    if (idx >= ordenados.length) return;
-    const restam = maxAparelhos - usados;
-    if (restam <= 0) return;
-    // poda: nem enchendo com o mais potente ainda disponível cobre o déficit
-    if (deficit > restam * potUtil(ordenados[idx])) return;
-    const maxQtd = Math.min(restam, Math.ceil(deficit / potUtil(ordenados[idx])));
-    for (let q = 0; q <= maxQtd; q++) {
-      qtds[idx] = q;
-      busca(idx + 1, usados + q, utilAcum + q * potUtil(ordenados[idx]));
-    }
-    qtds[idx] = 0;
-  }
-  busca(0, 0, 0);
 
   if (encontrados.length === 0) {
     return { status: "demanda-excede-cap", arranjos: [], modelosIgnorados };
@@ -371,7 +335,7 @@ export function sugerirArranjos(
   return { status: "ok", arranjos, modelosIgnorados };
 }
 
-/** "1× E10 + 1× E27" — rótulo de exibição de um arranjo. */
+/** "2× E21" — rótulo de exibição de um arranjo (o "+" só aparece em salvos antigos mistos). */
 export function rotuloArranjo(a: Arranjo): string {
   return a.itens.map((it) => `${it.qtd}× ${it.modeloId}`).join(" + ");
 }
