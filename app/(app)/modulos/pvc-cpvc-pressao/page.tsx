@@ -16,6 +16,7 @@ import {
   perdaProjetoEmVazao,
   detalheProjetoEmVazao,
   vazaoParaVelocidadeLmin,
+  alturaEstaticaNecessaria,
   BOMBAS_PRESSURIZACAO,
   Material,
   TrechoSalvo,
@@ -242,9 +243,19 @@ export default function PvcCpvcPressao() {
     if (manuais.length) return manuais;
     return baseTronco > 0 ? [0.5, 1, 2, 3].map((m) => baseTronco * m) : [];
   }, [f.cenarios, baseTronco]);
-  const pontosSistema = useMemo<[number, number][]>(
+  // perda de carga pura por cenário (cards) e a curva do sistema em pressurização
+  // (perda + altura estática necessária) usada no gráfico e no cruzamento com a bomba.
+  const pontosPerda = useMemo<[number, number][]>(
     () => cenariosValidos.map((q) => [q, perdaProjetoEmVazao(f.trechos, q)]),
     [cenariosValidos, f.trechos],
+  );
+  const offsetEstatico = useMemo(
+    () => alturaEstaticaNecessaria(f.trechos, f.residualInicial),
+    [f.trechos, f.residualInicial],
+  );
+  const pontosSistema = useMemo<[number, number][]>(
+    () => pontosPerda.map(([q, h]) => [q, h + offsetEstatico]),
+    [pontosPerda, offsetEstatico],
   );
   const sistema = useMemo(
     () => (pontosSistema.length >= 3 ? ajustaQuadratica(pontosSistema) : { a: 0, b: 0, c: 0 }),
@@ -272,8 +283,13 @@ export default function PvcCpvcPressao() {
       return { nome: b.nome, qOp, hOp, atende, qMax: curva.qMax };
     });
   }, [temBombas, pontosSistema, sistema, qMinSistema, qMaxSistema]);
-  const bombaSel = BOMBAS_PRESSURIZACAO.find((b) => b.nome === f.bombaSelecionada) ?? null;
-  const bombaSelRes = bombasRes.find((b) => b.nome === f.bombaSelecionada) ?? null;
+  // seleção efetiva: se nada foi escolhido (ou o nome salvo não existe mais), cai na 1ª bomba.
+  const bombaSelNome =
+    f.bombaSelecionada && BOMBAS_PRESSURIZACAO.some((b) => b.nome === f.bombaSelecionada)
+      ? f.bombaSelecionada
+      : BOMBAS_PRESSURIZACAO[0]?.nome ?? "";
+  const bombaSel = BOMBAS_PRESSURIZACAO.find((b) => b.nome === bombaSelNome) ?? null;
+  const bombaSelRes = bombasRes.find((b) => b.nome === bombaSelNome) ?? null;
 
   // pontos do gráfico: com bomba destacada (sistema + bomba) ou só o sistema.
   const curvasGrafico = useMemo(() => {
@@ -898,7 +914,7 @@ export default function PvcCpvcPressao() {
               Perda de carga por cenário
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {pontosSistema.map(([q, h], i) => (
+              {pontosPerda.map(([q, h], i) => (
                 <div key={i} className="rounded-xl bg-ink-700 p-3 text-center">
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400">Cenário {i + 1}</div>
                   <div className="font-display text-base font-bold text-zinc-100">{q.toFixed(1)} L/min</div>
@@ -976,9 +992,16 @@ export default function PvcCpvcPressao() {
             </h4>
             {temBombas ? (
               <>
+                <div className="mb-3 rounded-xl border border-amber/25 bg-amber/5 p-3 text-[11px] leading-relaxed text-zinc-400">
+                  <span className="font-semibold text-amber">Dimensionamento preliminar.</span> A curva
+                  do sistema soma à perda de carga a <span className="text-zinc-300">altura estática
+                  necessária de {offsetEstatico.toFixed(1)} mca</span> (pressão mínima do ponto crítico
+                  − pressão de entrada − desnível). Curvas Q×H aproximadas do catálogo Texius. Confirme
+                  a convenção de dimensionamento com a planilha do curso.
+                </div>
                 <SelectField
                   label="Bomba destacada no gráfico"
-                  value={f.bombaSelecionada}
+                  value={bombaSelNome}
                   onChange={(v) => set("bombaSelecionada", String(v))}
                   options={BOMBAS_PRESSURIZACAO.map((b) => ({ value: b.nome, label: b.nome }))}
                 />

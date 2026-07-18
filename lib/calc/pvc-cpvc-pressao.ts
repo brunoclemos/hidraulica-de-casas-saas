@@ -562,14 +562,58 @@ export function detalheProjetoEmVazao(
   });
 }
 
-// Catálogo de bombas de PRESSURIZAÇÃO (pontos Q [L/min] × H [mca] das curvas oficiais).
-// VAZIO até o cliente enviar os modelos atualizados (feedback 18/jul, vídeo 4:
-// "as bombas eu preciso te mandar as atualizadas — pro dimensionamento lá são outros
-// tipos de bomba"). Enquanto vazio, a seção de seleção fica em modo "aguardando
-// catálogo" e NÃO mostra número de bomba (evita resultado errado).
+// Catálogo de bombas de PRESSURIZAÇÃO (pontos Q [L/min] × H [mca] da curva Q×H).
+// Fonte: Catálogo Técnico Texius — Linha Comercial (rev. 25.11.25, pág. 5-11), enviado
+// pelo cliente (feedback 18/jul, vídeo 4).
 //
-// PENDENTE DE ENGENHARIA ao plugar as bombas — confirmar com o Ferreto: a curva do
-// sistema em PRESSURIZAÇÃO deve somar, além da perda de carga, a altura estática
-// (desnível líquido) + a pressão mínima no ponto − a pressão disponível na entrada.
-// No circulador (anel fechado) esse termo é ~0; aqui NÃO é. Espelhar a planilha nova.
-export const BOMBAS_PRESSURIZACAO: { nome: string; pontos: [number, number][] }[] = [];
+// Cada curva é aproximada por H = Hmáx·(1 − (Q/Qmáx)²), ancorada nos DOIS valores
+// publicados de cada modelo: pressão máx (altura de shutoff em Q=0) e vazão máx (fluxo
+// livre em H=0). É o modelo clássico de bomba e casa com o formato côncavo das curvas
+// do catálogo. Para precisão fina, substituir pelos pontos exatos das curvas oficiais.
+// As versões "com manifold" (DM) e "sem manifold" (D) e mono/trifásica compartilham a
+// mesma curva — muda só a conexão; por isso 1 entrada por curva distinta.
+function curvaAfim(hMax: number, qMax: number): [number, number][] {
+  return ([0, 0.2, 0.4, 0.6, 0.8, 1] as const).map((k): [number, number] => {
+    const q = k * qMax;
+    return [Math.round(q * 10) / 10, Math.round(hMax * (1 - k * k) * 100) / 100];
+  });
+}
+
+export const BOMBAS_PRESSURIZACAO: { nome: string; pontos: [number, number][] }[] = [
+  // Linha Smart Inverter (simples)
+  { nome: "Smart Home 250W", pontos: curvaAfim(29, 60) },
+  { nome: "Smart 300 · 1/2 CV", pontos: curvaAfim(23, 83) },
+  { nome: "Smart 1/2 CV", pontos: curvaAfim(27, 115) },
+  { nome: "Smart 1 CV", pontos: curvaAfim(37, 133) },
+  { nome: "Smart 2 CV", pontos: curvaAfim(55, 143) },
+  // Linha Smart Inverter Plus (duplo em cascata — 2× vazão, mesma pressão)
+  { nome: "Smart Duplo 1/2 CV", pontos: curvaAfim(27, 230) },
+  { nome: "Smart Duplo 1 CV", pontos: curvaAfim(37, 266) },
+  { nome: "Smart Duplo 2 CV", pontos: curvaAfim(55, 285) },
+  // Linha TPI-XL (simples)
+  { nome: "TPI-XL 6-30 · 2 CV", pontos: curvaAfim(50, 200) },
+  { nome: "TPI-XL 10-50 · 3 CV", pontos: curvaAfim(60, 300) },
+  // Linha TPI-XL Plus (duplo em cascata)
+  { nome: "TPI-XL Duplo 6-30 · 2 CV", pontos: curvaAfim(50, 400) },
+  { nome: "TPI-XL Duplo 10-50 · 3 CV", pontos: curvaAfim(60, 600) },
+];
+
+// Altura estática necessária (mca) que a bomba precisa vencer ALÉM da perda de carga,
+// pra que o ponto crítico atinja a pressão mínima. Modelo de 1ª ordem (caminho total):
+//   C = pmin_crítico − pressão_entrada − Σ(desnível)
+// onde desnível = desce − sobe (subir consome pressão). Assim a curva do sistema em
+// pressurização = perda_de_carga(Q) + C, diferente do anel fechado do circulador (C≈0).
+// PRELIMINAR: confirmar a convenção com a planilha do curso do Ferreto (definição exata
+// de ponto crítico e acúmulo até ele podem diferir).
+export function alturaEstaticaNecessaria(
+  trechos: TrechoSalvo[],
+  pressaoEntrada: number,
+): number {
+  const proj = calcularProjeto(trechos, pressaoEntrada);
+  if (!proj.length) return 0;
+  const critico = proj.reduce((m, p) =>
+    p.resultado.pressaoResidual < m.resultado.pressaoResidual ? p : m,
+  );
+  const somaDesnivel = proj.reduce((s, p) => s + p.resultado.desnivel, 0);
+  return critico.resultado.pressaoMinima - pressaoEntrada - somaDesnivel;
+}
