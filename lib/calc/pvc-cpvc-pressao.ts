@@ -598,22 +598,7 @@ export const BOMBAS_PRESSURIZACAO: { nome: string; pontos: [number, number][] }[
   { nome: "TPI-XL Duplo 10-50 · 3 CV", pontos: curvaAfim(60, 600) },
 ];
 
-// Altura estática necessária (mca) que a bomba precisa vencer ALÉM da perda de carga,
-// pra que o ponto crítico atinja a pressão mínima. Modelo de 1ª ordem (caminho total):
-//   C = pmin_crítico − pressão_entrada − Σ(desnível)
-// onde desnível = desce − sobe (subir consome pressão). Assim a curva do sistema em
-// pressurização = perda_de_carga(Q) + C, diferente do anel fechado do circulador (C≈0).
-// PRELIMINAR: confirmar a convenção com a planilha do curso do Ferreto (definição exata
-// de ponto crítico e acúmulo até ele podem diferir).
-export function alturaEstaticaNecessaria(
-  trechos: TrechoSalvo[],
-  pressaoEntrada: number,
-): number {
-  const proj = calcularProjeto(trechos, pressaoEntrada);
-  if (!proj.length) return 0;
-  const critico = proj.reduce((m, p) =>
-    p.resultado.pressaoResidual < m.resultado.pressaoResidual ? p : m,
-  );
-  const somaDesnivel = proj.reduce((s, p) => s + p.resultado.desnivel, 0);
-  return critico.resultado.pressaoMinima - pressaoEntrada - somaDesnivel;
-}
+// A seleção de bomba usa o modelo do cliente (áudio 18/jul): ponto único de projeto =
+// vazão total do tronco + pressão que falta pro ponto crítico atingir o mínimo
+// (max(pressão mínima − pressão residual)). Isso já sai de calcularProjeto — não há
+// conta de "altura estática" separada. A composição é feita na página do módulo.

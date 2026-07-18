@@ -11,6 +11,7 @@ export function QHChart({
   qMin,
   qMax,
   nomeBomba,
+  nomeSistema = "Sistema",
 }: {
   pontos: { q: number; hSistema: number; hBomba: number | null }[];
   qOp: number | null;
@@ -18,6 +19,7 @@ export function QHChart({
   qMin: number;
   qMax: number;
   nomeBomba: string;
+  nomeSistema?: string;
 }) {
   const W = 340;
   const H = 210;
@@ -103,7 +105,7 @@ export function QHChart({
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-400">
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-2 w-3 rounded-sm" style={{ background: "#60a5fa" }} />
-          Sistema
+          {nomeSistema}
         </span>
         {nomeBomba && (
           <span className="inline-flex items-center gap-1.5">
@@ -111,10 +113,12 @@ export function QHChart({
             {nomeBomba}
           </span>
         )}
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2 w-3 rounded-sm bg-amber/20" />
-          Faixa útil
-        </span>
+        {qMax > qMin && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2 w-3 rounded-sm bg-amber/20" />
+            Faixa útil
+          </span>
+        )}
         <span className="ml-auto text-zinc-600">vazão (L/min) · pressão (mca)</span>
       </div>
     </div>

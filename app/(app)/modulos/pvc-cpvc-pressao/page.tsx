@@ -16,12 +16,11 @@ import {
   perdaProjetoEmVazao,
   detalheProjetoEmVazao,
   vazaoParaVelocidadeLmin,
-  alturaEstaticaNecessaria,
   BOMBAS_PRESSURIZACAO,
   Material,
   TrechoSalvo,
 } from "@/lib/calc/pvc-cpvc-pressao";
-import { ajustaQuadratica, curvaBomba, interseccao, amostraCurvas } from "@/lib/calc/bombas";
+import { curvaBomba } from "@/lib/calc/bombas";
 import { NumberField, SelectField, Stepper, Accordion } from "@/components/Fields";
 import { QHChart } from "@/components/QHChart";
 import { PipeFlow } from "@/components/PipeFlow";
@@ -243,26 +242,11 @@ export default function PvcCpvcPressao() {
     if (manuais.length) return manuais;
     return baseTronco > 0 ? [0.5, 1, 2, 3].map((m) => baseTronco * m) : [];
   }, [f.cenarios, baseTronco]);
-  // perda de carga pura por cenário (cards) e a curva do sistema em pressurização
-  // (perda + altura estática necessária) usada no gráfico e no cruzamento com a bomba.
+  // v5: perda de carga pura por cenário (cards + detalhamento de comparação).
   const pontosPerda = useMemo<[number, number][]>(
     () => cenariosValidos.map((q) => [q, perdaProjetoEmVazao(f.trechos, q)]),
     [cenariosValidos, f.trechos],
   );
-  const offsetEstatico = useMemo(
-    () => alturaEstaticaNecessaria(f.trechos, f.residualInicial),
-    [f.trechos, f.residualInicial],
-  );
-  const pontosSistema = useMemo<[number, number][]>(
-    () => pontosPerda.map(([q, h]) => [q, h + offsetEstatico]),
-    [pontosPerda, offsetEstatico],
-  );
-  const sistema = useMemo(
-    () => (pontosSistema.length >= 3 ? ajustaQuadratica(pontosSistema) : { a: 0, b: 0, c: 0 }),
-    [pontosSistema],
-  );
-  const qMinSistema = pontosSistema.length ? Math.min(...pontosSistema.map((p) => p[0])) : 0;
-  const qMaxSistema = pontosSistema.length ? Math.max(...pontosSistema.map((p) => p[0])) : 0;
 
   // velocidade-alvo -> vazão equivalente no tronco (1ª inserção), como no Circuladores.
   const [velAlvo, setVelAlvo] = useState(2.5);
@@ -271,18 +255,37 @@ export default function PvcCpvcPressao() {
     : 0;
   const vazaoEquivVel = vazaoParaVelocidadeLmin(velAlvo, dnIntTronco);
 
-  // seleção de bomba (catálogo de pressurização — VAZIO até o cliente enviar).
+  // --- SELEÇÃO DE BOMBA (modelo do cliente, áudio 18/jul): a bomba é escolhida por UM
+  // ponto — a VAZÃO TOTAL do tronco (1ª inserção) e a PRESSÃO que falta pro ponto mais
+  // crítico atingir o mínimo. Sem cenário e sem conta nova: pressão necessária =
+  // max(pressão mínima − pressão residual), já vem do cálculo trecho a trecho. ---
   const temBombas = BOMBAS_PRESSURIZACAO.length > 0;
+  const vazaoProjeto = baseTronco; // vazão total do tronco (L/min)
+  const pontoCritico = useMemo(() => {
+    if (!projeto.length) return null;
+    return projeto.reduce((pior, p) =>
+      p.resultado.pressaoMinima - p.resultado.pressaoResidual >
+      pior.resultado.pressaoMinima - pior.resultado.pressaoResidual
+        ? p
+        : pior,
+    );
+  }, [projeto]);
+  const pressaoNecessaria = pontoCritico
+    ? Math.max(0, pontoCritico.resultado.pressaoMinima - pontoCritico.resultado.pressaoResidual)
+    : 0;
+
   const bombasRes = useMemo(() => {
-    if (!temBombas || pontosSistema.length < 3) return [];
+    if (!temBombas || !(vazaoProjeto > 0)) return [];
     return BOMBAS_PRESSURIZACAO.map((b) => {
-      const curva = curvaBomba(b.pontos);
-      const qOp = interseccao(sistema, curva);
-      const hOp = qOp !== null ? sistema.a + sistema.b * qOp + sistema.c * qOp * qOp : null;
-      const atende = qOp !== null && qOp >= qMinSistema && qOp <= qMaxSistema;
-      return { nome: b.nome, qOp, hOp, atende, qMax: curva.qMax };
+      const c = curvaBomba(b.pontos);
+      const dentroFaixa = vazaoProjeto <= c.qMax;
+      const hEntrega = dentroFaixa
+        ? Math.max(0, c.a + c.b * vazaoProjeto + c.c * vazaoProjeto * vazaoProjeto)
+        : 0;
+      const atende = dentroFaixa && hEntrega >= pressaoNecessaria;
+      return { nome: b.nome, hEntrega, atende, qMax: c.qMax, dentroFaixa };
     });
-  }, [temBombas, pontosSistema, sistema, qMinSistema, qMaxSistema]);
+  }, [temBombas, vazaoProjeto, pressaoNecessaria]);
   // seleção efetiva: se nada foi escolhido (ou o nome salvo não existe mais), cai na 1ª bomba.
   const bombaSelNome =
     f.bombaSelecionada && BOMBAS_PRESSURIZACAO.some((b) => b.nome === f.bombaSelecionada)
@@ -291,31 +294,30 @@ export default function PvcCpvcPressao() {
   const bombaSel = BOMBAS_PRESSURIZACAO.find((b) => b.nome === bombaSelNome) ?? null;
   const bombaSelRes = bombasRes.find((b) => b.nome === bombaSelNome) ?? null;
 
-  // pontos do gráfico: com bomba destacada (sistema + bomba) ou só o sistema.
+  // gráfico: curva da bomba destacada + linha horizontal da pressão necessária, com
+  // marcador no ponto de projeto (vazão de projeto, pressão necessária).
   const curvasGrafico = useMemo(() => {
-    if (bombaSel) return amostraCurvas(sistema, bombaSel, qMaxSistema, bombaSelRes?.qOp ?? null);
-    const qMaxGraf = Math.max(qMaxSistema * 1.4, qMaxSistema + 2, 1e-6);
-    const N = 40;
+    const c = bombaSel ? curvaBomba(bombaSel.pontos) : null;
+    const qMaxGraf = Math.max((c?.qMax ?? 0) * 1.02, vazaoProjeto * 1.4, 1e-6);
+    const N = 48;
     return Array.from({ length: N + 1 }, (_, i) => {
       const q = (i * qMaxGraf) / N;
-      return { q, hSistema: sistema.a + sistema.b * q + sistema.c * q * q, hBomba: null };
+      const hBomba = c && q <= c.qMax ? c.a + c.b * q + c.c * q * q : null;
+      return { q, hSistema: pressaoNecessaria, hBomba };
     });
-  }, [bombaSel, sistema, qMaxSistema, bombaSelRes]);
+  }, [bombaSel, pressaoNecessaria, vazaoProjeto]);
 
-  // colunas do detalhamento por trecho: 1 por cenário + ponto de operação (se houver bomba).
-  const qOpDet = bombaSelRes?.qOp ?? null;
-  const colunasDetalhe = useMemo(() => {
-    const cols = cenariosValidos.map((q, i) => ({
-      titulo: `Cenário ${i + 1}`,
-      q,
-      linhas: detalheProjetoEmVazao(f.trechos, q),
-      destaque: false,
-    }));
-    if (qOpDet !== null) {
-      cols.push({ titulo: "Ponto de operação", q: qOpDet, linhas: detalheProjetoEmVazao(f.trechos, qOpDet), destaque: true });
-    }
-    return cols;
-  }, [cenariosValidos, f.trechos, qOpDet]);
+  // detalhamento por trecho e cenário (v5): 1 coluna por cenário.
+  const colunasDetalhe = useMemo(
+    () =>
+      cenariosValidos.map((q, i) => ({
+        titulo: `Cenário ${i + 1}`,
+        q,
+        linhas: detalheProjetoEmVazao(f.trechos, q),
+        destaque: false,
+      })),
+    [cenariosValidos, f.trechos],
+  );
 
   // ações de inserção (igual às macros: vai inserindo, NÃO fecha o projeto)
   function inserir() {
@@ -845,12 +847,12 @@ export default function PvcCpvcPressao() {
       {f.trechos.length > 0 && (
         <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
           <h3 className="mb-1 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-            Curva do sistema × bomba
+            Cenários & seleção de bomba
           </h3>
           <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
-            Simula cenários de vazão: cada cenário recalcula a casa toda e mostra a perda de carga.
-            A vazão do cenário é a do <span className="text-zinc-400">tronco (1ª inserção)</span>; os
-            demais trechos escalam proporcionalmente.
+            Cada cenário recalcula a casa toda e mostra a perda de carga. A vazão do cenário é a do{" "}
+            <span className="text-zinc-400">tronco (1ª inserção)</span>; os demais trechos escalam
+            proporcionalmente.
           </p>
 
           {/* velocidade-alvo -> vazão equivalente no tronco */}
@@ -891,22 +893,6 @@ export default function PvcCpvcPressao() {
             Em branco = múltiplos automáticos do tronco
             {baseTronco > 0 ? ` (base ${baseTronco.toFixed(1)} L/min)` : ""}.
           </p>
-
-          {pontosSistema.length >= 3 ? (
-            <QHChart
-              pontos={curvasGrafico}
-              qOp={bombaSelRes?.qOp ?? null}
-              hOp={bombaSelRes?.hOp ?? null}
-              qMin={qMinSistema}
-              qMax={qMaxSistema}
-              nomeBomba={bombaSel?.nome ?? ""}
-            />
-          ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-ink-600 p-4 text-center text-[12px] text-zinc-500">
-              Informe ao menos 3 cenários (ou deixe todos em branco para usar os múltiplos automáticos
-              do tronco) para traçar a curva do sistema.
-            </div>
-          )}
 
           {/* perda de carga por cenário */}
           <div className="mt-4">
@@ -985,71 +971,104 @@ export default function PvcCpvcPressao() {
             </Accordion>
           </div>
 
-          {/* ponto de operação × bombas (catálogo de pressurização) */}
+          {/* seleção de bomba — ponto de projeto (vazão total do tronco + pressão necessária) */}
           <div className="mt-4 rounded-2xl border border-ink-600 bg-ink-700 p-4">
             <h4 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-              Ponto de operação × bombas
+              Seleção de bomba (pressurização)
             </h4>
             {temBombas ? (
               <>
-                <div className="mb-3 rounded-xl border border-amber/25 bg-amber/5 p-3 text-[11px] leading-relaxed text-zinc-400">
-                  <span className="font-semibold text-amber">Dimensionamento preliminar.</span> A curva
-                  do sistema soma à perda de carga a <span className="text-zinc-300">altura estática
-                  necessária de {offsetEstatico.toFixed(1)} mca</span> (pressão mínima do ponto crítico
-                  − pressão de entrada − desnível). Curvas Q×H aproximadas do catálogo Texius. Confirme
-                  a convenção de dimensionamento com a planilha do curso.
+                {/* ponto de projeto: vazão total do tronco + pressão que a bomba precisa dar */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Hero titulo="Vazão de projeto" valor={`${vazaoProjeto.toFixed(1)} L/min`} sub="vazão total do tronco" />
+                  <Hero
+                    titulo="Pressão necessária"
+                    valor={`${pressaoNecessaria.toFixed(2)} mca`}
+                    sub={
+                      pressaoNecessaria > 0 && pontoCritico
+                        ? `falta no ponto crítico: ${[pontoCritico.trecho.ambiente, pontoCritico.trecho.nome].filter(Boolean).join(" · ") || "trecho"}`
+                        : "a rede já atinge o mínimo sem bomba"
+                    }
+                    alerta={pressaoNecessaria > 0}
+                  />
                 </div>
-                <SelectField
-                  label="Bomba destacada no gráfico"
-                  value={bombaSelNome}
-                  onChange={(v) => set("bombaSelecionada", String(v))}
-                  options={BOMBAS_PRESSURIZACAO.map((b) => ({ value: b.nome, label: b.nome }))}
+                <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                  A bomba é escolhida por 1 ponto: a <span className="text-zinc-400">vazão total do
+                  tronco</span> e a <span className="text-zinc-400">pressão que falta</span> pro ponto
+                  mais crítico atingir o mínimo (pressão mínima − pressão residual, já sai do cálculo).
+                  Curvas Q×H aproximadas do catálogo Texius.
+                </p>
+
+                <div className="mt-3">
+                  <SelectField
+                    label="Bomba destacada no gráfico"
+                    value={bombaSelNome}
+                    onChange={(v) => set("bombaSelecionada", String(v))}
+                    options={BOMBAS_PRESSURIZACAO.map((b) => ({ value: b.nome, label: b.nome }))}
+                  />
+                </div>
+
+                <QHChart
+                  pontos={curvasGrafico}
+                  qOp={vazaoProjeto}
+                  hOp={pressaoNecessaria}
+                  qMin={0}
+                  qMax={0}
+                  nomeBomba={bombaSel?.nome ?? ""}
+                  nomeSistema="Pressão necessária"
                 />
+
                 {bombaSelRes && (
                   <div className="mt-3 grid grid-cols-3 gap-2">
-                    <Hero titulo="Vazão de operação" valor={bombaSelRes.qOp !== null ? `${bombaSelRes.qOp.toFixed(1)} L/min` : "—"} />
-                    <Hero titulo="Pressão de operação" valor={bombaSelRes.hOp !== null ? `${bombaSelRes.hOp.toFixed(2)} mca` : "—"} />
+                    <Hero
+                      titulo="Entrega na vazão"
+                      valor={bombaSelRes.dentroFaixa ? `${bombaSelRes.hEntrega.toFixed(2)} mca` : "—"}
+                      sub={bombaSelRes.dentroFaixa ? `em ${vazaoProjeto.toFixed(0)} L/min` : "vazão acima da bomba"}
+                    />
+                    <Hero titulo="Precisa" valor={`${pressaoNecessaria.toFixed(2)} mca`} />
                     <div className="flex flex-col justify-center rounded-2xl bg-ink-600 p-3">
-                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">Faixa útil</div>
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">Atende?</div>
                       <div className={`mt-0.5 font-display text-sm font-bold ${bombaSelRes.atende ? "text-emerald-400" : "text-red-400"}`}>
-                        {bombaSelRes.atende ? "Dentro" : "Fora"}
+                        {bombaSelRes.atende ? "Sim" : "Não"}
                       </div>
                     </div>
                   </div>
                 )}
+
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full text-left text-[12px]">
                     <thead>
                       <tr className="text-zinc-500">
                         <th className="pb-2 font-medium">Bomba</th>
-                        <th className="pb-2 text-right font-medium">Q oper.</th>
-                        <th className="pb-2 text-right font-medium">P oper.</th>
+                        <th className="pb-2 text-right font-medium">Entrega em {vazaoProjeto.toFixed(0)} L/min</th>
                         <th className="pb-2 text-right font-medium">Atende?</th>
                       </tr>
                     </thead>
                     <tbody>
                       {bombasRes.map((b) => {
-                        const selecionada = b.nome === f.bombaSelecionada;
+                        const selecionada = b.nome === bombaSelNome;
                         return (
                           <tr key={b.nome} className={`border-t border-ink-500 ${selecionada ? "bg-amber-deep/45 ring-1 ring-amber" : ""}`}>
                             <td className={`py-2 pl-2 pr-2 ${selecionada ? "border-l-4 border-amber font-bold text-amber" : "text-zinc-300"}`}>{b.nome}</td>
-                            <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>{b.qOp !== null ? b.qOp.toFixed(1) : "—"}</td>
-                            <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>{b.hOp !== null ? b.hOp.toFixed(2) : "—"}</td>
-                            <td className={`py-2 pr-2 text-right font-semibold ${selecionada ? "text-amber" : b.atende ? "text-emerald-400" : "text-zinc-600"}`}>{b.atende ? "sim" : "fora"}</td>
+                            <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>{b.dentroFaixa ? `${b.hEntrega.toFixed(2)} mca` : "vazão alta"}</td>
+                            <td className={`py-2 pr-2 text-right font-semibold ${selecionada ? "text-amber" : b.atende ? "text-emerald-400" : "text-zinc-600"}`}>{b.atende ? "sim" : "não"}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
+                <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+                  “Atende” = a bomba entrega pressão ≥ a necessária na vazão de projeto. Dimensionamento
+                  preliminar — confira contra a planilha do curso.
+                </p>
               </>
             ) : (
               <div className="rounded-xl border border-dashed border-amber/30 bg-amber/5 p-4 text-center">
                 <div className="font-display text-sm font-bold text-amber">Seleção de bomba — em breve</div>
                 <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-zinc-400">
-                  O cruzamento com a curva da bomba entra assim que você enviar o catálogo de bombas
-                  de pressurização atualizado (modelos e curvas Q × H). A curva do sistema acima já
-                  sai pronta — é só plugar as bombas.
+                  A seleção entra assim que você enviar o catálogo de bombas de pressurização
+                  (modelos e curvas Q × H).
                 </p>
               </div>
             )}
