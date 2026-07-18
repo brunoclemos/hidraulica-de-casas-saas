@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   calcularTrecho,
@@ -8,13 +8,21 @@ import {
   trechoPadrao,
   normalizarTrecho,
   diametrosDe,
+  diametroInterno,
   conexoesDe,
   PECAS_UTILIZACAO,
   PRESSAO_MINIMA,
+  vazaoTroncoBase,
+  perdaProjetoEmVazao,
+  detalheProjetoEmVazao,
+  vazaoParaVelocidadeLmin,
+  BOMBAS_PRESSURIZACAO,
   Material,
   TrechoSalvo,
 } from "@/lib/calc/pvc-cpvc-pressao";
+import { ajustaQuadratica, curvaBomba, interseccao, amostraCurvas } from "@/lib/calc/bombas";
 import { NumberField, SelectField, Stepper, Accordion } from "@/components/Fields";
+import { QHChart } from "@/components/QHChart";
 import { PipeFlow } from "@/components/PipeFlow";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -37,9 +45,11 @@ interface Form {
   material: Material;
   residualInicial: number; // mca disponível na entrada do projeto
   trechos: TrechoSalvo[]; // inserções já confirmadas
+  cenarios: number[]; // vazões de tronco (L/min) da curva do sistema (vídeos 4/5)
+  bombaSelecionada: string; // bomba destacada no gráfico (catálogo de pressurização)
 }
 
-const PADRAO: Form = { material: "PVC", residualInicial: 10, trechos: [] };
+const PADRAO: Form = { material: "PVC", residualInicial: 10, trechos: [], cenarios: [], bombaSelecionada: "" };
 
 function freshDraft(material: Material, count: number, base?: TrechoSalvo): TrechoSalvo {
   const d = trechoPadrao(material);
@@ -128,6 +138,9 @@ export default function PvcCpvcPressao() {
           ? raw.residualInicial
           : PADRAO.residualInicial,
       trechos: Array.isArray(raw.trechos) ? raw.trechos.map(normalizarTrecho) : [],
+      // campos novos (vídeos 4/5) — projeto antigo não tem: default vazio.
+      cenarios: Array.isArray(raw.cenarios) ? raw.cenarios : [],
+      bombaSelecionada: typeof raw.bombaSelecionada === "string" ? raw.bombaSelecionada : "",
     };
     setF(inputs);
     setDraft(freshDraft(inputs.material, inputs.trechos.length));
@@ -213,6 +226,81 @@ export default function PvcCpvcPressao() {
     return Array.from(map.values());
   }, [projeto]);
 
+  // --- curva do sistema & cenários (vídeos 4/5): opera sobre as inserções confirmadas ---
+  const setCenario = (idx: number, v: number) =>
+    setF((p) => {
+      const cen = [...(p.cenarios ?? [])];
+      while (cen.length <= idx) cen.push(NaN);
+      cen[idx] = v;
+      return { ...p, cenarios: cen };
+    });
+
+  const baseTronco = useMemo(() => vazaoTroncoBase(f.trechos), [f.trechos]);
+  // cenários válidos: os digitados (>0) ou, se nenhum, múltiplos automáticos do tronco.
+  const cenariosValidos = useMemo(() => {
+    const manuais = (f.cenarios ?? []).filter((q) => Number.isFinite(q) && q > 0);
+    if (manuais.length) return manuais;
+    return baseTronco > 0 ? [0.5, 1, 2, 3].map((m) => baseTronco * m) : [];
+  }, [f.cenarios, baseTronco]);
+  const pontosSistema = useMemo<[number, number][]>(
+    () => cenariosValidos.map((q) => [q, perdaProjetoEmVazao(f.trechos, q)]),
+    [cenariosValidos, f.trechos],
+  );
+  const sistema = useMemo(
+    () => (pontosSistema.length >= 3 ? ajustaQuadratica(pontosSistema) : { a: 0, b: 0, c: 0 }),
+    [pontosSistema],
+  );
+  const qMinSistema = pontosSistema.length ? Math.min(...pontosSistema.map((p) => p[0])) : 0;
+  const qMaxSistema = pontosSistema.length ? Math.max(...pontosSistema.map((p) => p[0])) : 0;
+
+  // velocidade-alvo -> vazão equivalente no tronco (1ª inserção), como no Circuladores.
+  const [velAlvo, setVelAlvo] = useState(2.5);
+  const dnIntTronco = f.trechos[0]
+    ? diametroInterno(f.trechos[0].material, f.trechos[0].diametro)
+    : 0;
+  const vazaoEquivVel = vazaoParaVelocidadeLmin(velAlvo, dnIntTronco);
+
+  // seleção de bomba (catálogo de pressurização — VAZIO até o cliente enviar).
+  const temBombas = BOMBAS_PRESSURIZACAO.length > 0;
+  const bombasRes = useMemo(() => {
+    if (!temBombas || pontosSistema.length < 3) return [];
+    return BOMBAS_PRESSURIZACAO.map((b) => {
+      const curva = curvaBomba(b.pontos);
+      const qOp = interseccao(sistema, curva);
+      const hOp = qOp !== null ? sistema.a + sistema.b * qOp + sistema.c * qOp * qOp : null;
+      const atende = qOp !== null && qOp >= qMinSistema && qOp <= qMaxSistema;
+      return { nome: b.nome, qOp, hOp, atende, qMax: curva.qMax };
+    });
+  }, [temBombas, pontosSistema, sistema, qMinSistema, qMaxSistema]);
+  const bombaSel = BOMBAS_PRESSURIZACAO.find((b) => b.nome === f.bombaSelecionada) ?? null;
+  const bombaSelRes = bombasRes.find((b) => b.nome === f.bombaSelecionada) ?? null;
+
+  // pontos do gráfico: com bomba destacada (sistema + bomba) ou só o sistema.
+  const curvasGrafico = useMemo(() => {
+    if (bombaSel) return amostraCurvas(sistema, bombaSel, qMaxSistema, bombaSelRes?.qOp ?? null);
+    const qMaxGraf = Math.max(qMaxSistema * 1.4, qMaxSistema + 2, 1e-6);
+    const N = 40;
+    return Array.from({ length: N + 1 }, (_, i) => {
+      const q = (i * qMaxGraf) / N;
+      return { q, hSistema: sistema.a + sistema.b * q + sistema.c * q * q, hBomba: null };
+    });
+  }, [bombaSel, sistema, qMaxSistema, bombaSelRes]);
+
+  // colunas do detalhamento por trecho: 1 por cenário + ponto de operação (se houver bomba).
+  const qOpDet = bombaSelRes?.qOp ?? null;
+  const colunasDetalhe = useMemo(() => {
+    const cols = cenariosValidos.map((q, i) => ({
+      titulo: `Cenário ${i + 1}`,
+      q,
+      linhas: detalheProjetoEmVazao(f.trechos, q),
+      destaque: false,
+    }));
+    if (qOpDet !== null) {
+      cols.push({ titulo: "Ponto de operação", q: qOpDet, linhas: detalheProjetoEmVazao(f.trechos, qOpDet), destaque: true });
+    }
+    return cols;
+  }, [cenariosValidos, f.trechos, qOpDet]);
+
   // ações de inserção (igual às macros: vai inserindo, NÃO fecha o projeto)
   function inserir() {
     setF((p) => ({ ...p, trechos: [...p.trechos, { ...draft }] }));
@@ -250,6 +338,7 @@ export default function PvcCpvcPressao() {
 
   const opcoesDiam = diametrosDe(f.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
   const conexoes = conexoesDe(f.material);
+  const tiposConexoesAtivos = Object.values(draft.conexoes).filter((q) => q > 0).length;
   const isAQ = f.material === "CPVC";
   const editando = editIndex !== null;
 
@@ -361,48 +450,91 @@ export default function PvcCpvcPressao() {
           </Accordion>
         )}
 
-        <Accordion title="Peças de utilização do trecho" defaultOpen>
-          <p className="mb-1 text-[11px] text-zinc-500">
-            Quantidade de cada peça abastecida no trecho (define a soma dos pesos → vazão).
-          </p>
-          <div className="grid grid-cols-1 gap-3">
-            {PECAS_UTILIZACAO.map((p) => (
-              <Stepper
-                key={p.nome}
-                label={`${p.nome} (peso ${p.peso})`}
-                value={draft.pecas[p.nome] ?? 0}
-                onChange={(v) => setPeca(p.nome, v)}
-                min={0}
-                max={40}
+        <Accordion title="Vazão do trecho" defaultOpen>
+          {/* Vídeo 1 do cliente: escolher Método dos Pesos OU digitar a vazão. */}
+          <div className="grid grid-cols-2 gap-2">
+            {([["pesos", "Método dos pesos"], ["manual", "Vazão manual"]] as const).map(
+              ([modo, rotulo]) => (
+                <button
+                  key={modo}
+                  type="button"
+                  onClick={() => setDraftPatch({ modoVazao: modo })}
+                  className={`rounded-xl border py-2.5 text-sm font-semibold transition ${
+                    draft.modoVazao === modo
+                      ? "border-amber bg-amber/10 text-amber"
+                      : "border-ink-600 bg-ink-800 text-zinc-400"
+                  }`}
+                >
+                  {rotulo}
+                </button>
+              ),
+            )}
+          </div>
+
+          {draft.modoVazao === "manual" ? (
+            <div className="mt-3">
+              <NumberField
+                label="Vazão do trecho"
+                value={draft.vazaoManualLmin}
+                onChange={(v) => setDraftPatch({ vazaoManualLmin: v })}
+                unit="L/min"
+                step={0.1}
+                hint="Vazão de projeto informada direto (sem somar pesos)."
               />
-            ))}
-          </div>
-          <div className="mt-2 text-[11px] text-zinc-500">
-            Soma dos pesos: <span className="font-semibold text-zinc-300">{r.somaPesos.toFixed(2)}</span>
-          </div>
+              <div className="mt-2 text-[11px] text-zinc-500">
+                Equivale a <span className="font-semibold text-zinc-300">{r.vazaoLs.toFixed(3)} L/s</span>.
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="mb-1 mt-3 text-[11px] text-zinc-500">
+                Quantidade de cada peça abastecida no trecho (define a soma dos pesos → vazão).
+              </p>
+              <div className="grid grid-cols-1 gap-3">
+                {PECAS_UTILIZACAO.map((p) => (
+                  <Stepper
+                    key={p.nome}
+                    label={`${p.nome} (peso ${p.peso})`}
+                    value={draft.pecas[p.nome] ?? 0}
+                    onChange={(v) => setPeca(p.nome, v)}
+                    min={0}
+                    max={40}
+                  />
+                ))}
+              </div>
+              <div className="mt-2 text-[11px] text-zinc-500">
+                Soma dos pesos:{" "}
+                <span className="font-semibold text-zinc-300">{r.somaPesos.toFixed(2)}</span> → vazão{" "}
+                {r.vazaoLmin.toFixed(1)} L/min
+              </div>
+            </>
+          )}
         </Accordion>
 
-        <Accordion title={`Conexões do trecho · comp. equivalente (${conexoes.length})`}>
-          <p className="mb-1 text-[11px] leading-relaxed text-zinc-500">
+        {/* Vídeo 2 do cliente: lista de conexões "muito grande" → grid compacto
+            (2 colunas, input pequeno) + resumo no título, no padrão do Circuladores. */}
+        <Accordion title={`Conexões · ${tiposConexoesAtivos} tipo(s) · ${r.compEquivalente.toFixed(2)} m`}>
+          <p className="mb-2 text-[11px] leading-relaxed text-zinc-500">
             Tabela completa de conexões {f.material} da planilha do curso ({conexoes.length} tipos).
-            O valor entre parênteses é o comp. equivalente para a bitola {draft.diametro} mm.
+            O número ao lado de cada peça é o comp. equivalente na bitola {draft.diametro} mm.
           </p>
-          <div className="max-h-80 overflow-y-auto rounded-xl border border-ink-700/60 p-2">
-            <div className="grid grid-cols-1 gap-3">
-              {conexoes.map((c) => (
-                <Stepper
-                  key={c.id}
-                  label={`${c.nome} (${(c.valores[draft.diametro] ?? 0).toFixed(2)} m)`}
-                  value={draft.conexoes[c.id] ?? 0}
-                  onChange={(v) => setConexao(c.id, v)}
+          <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+            {conexoes.map((c) => (
+              <div key={c.id} className="flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
                   min={0}
-                  max={40}
+                  value={draft.conexoes[c.id] ?? 0}
+                  onChange={(e) => setConexao(c.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-14 rounded-lg border border-ink-600 bg-ink-800 px-2 py-1.5 text-center text-sm font-semibold text-zinc-100 outline-none focus:border-amber/60"
                 />
-              ))}
-            </div>
-          </div>
-          <div className="mt-2 text-[11px] text-zinc-500">
-            Comp. equivalente: <span className="font-semibold text-zinc-300">{r.compEquivalente.toFixed(2)} m</span>
+                <span className="min-w-0 flex-1 text-[12px] leading-tight text-zinc-400">
+                  {c.nome}
+                  <span className="text-zinc-600"> · {(c.valores[draft.diametro] ?? 0).toFixed(2)} m</span>
+                </span>
+              </div>
+            ))}
           </div>
         </Accordion>
 
@@ -422,6 +554,17 @@ export default function PvcCpvcPressao() {
                 onChange={(v) => setDraftPatch({ qtdValvulaMisturadora: v })}
                 min={0}
                 max={10}
+              />
+            )}
+            {/* Vídeo 3 do cliente: Kv editável puxando a mesma fórmula do Circuladores. */}
+            {isAQ && (
+              <NumberField
+                label="Kv da válvula"
+                value={draft.kvValvula}
+                onChange={(v) => setDraftPatch({ kvValvula: v })}
+                unit="m³/h"
+                step={0.1}
+                hint="Coef. de vazão da válvula misturadora (planilha do curso usa 2,6)."
               />
             )}
             <SelectField
@@ -681,6 +824,215 @@ export default function PvcCpvcPressao() {
           inserção para editar.
         </p>
       </div>
+
+      {/* CURVA DO SISTEMA × BOMBA (vídeos 4 e 5 do cliente 18/jul) */}
+      {f.trechos.length > 0 && (
+        <div className="rounded-2xl border border-ink-700 bg-ink-800 p-4">
+          <h3 className="mb-1 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+            Curva do sistema × bomba
+          </h3>
+          <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
+            Simula cenários de vazão: cada cenário recalcula a casa toda e mostra a perda de carga.
+            A vazão do cenário é a do <span className="text-zinc-400">tronco (1ª inserção)</span>; os
+            demais trechos escalam proporcionalmente.
+          </p>
+
+          {/* velocidade-alvo -> vazão equivalente no tronco */}
+          <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-amber/25 bg-amber/5 p-3">
+            <div className="w-32">
+              <NumberField
+                label="Velocidade-alvo (tronco)"
+                value={velAlvo}
+                onChange={setVelAlvo}
+                unit="m/s"
+                step={0.1}
+              />
+            </div>
+            <div className="flex-1">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Vazão equivalente</div>
+              <div className="font-display text-lg font-bold text-amber">{vazaoEquivVel.toFixed(1)} L/min</div>
+              <div className="text-[11px] text-zinc-500">
+                Copie num cenário abaixo pra testar o limite de velocidade.
+              </div>
+            </div>
+          </div>
+
+          {/* cenários de vazão */}
+          <div className="grid grid-cols-4 gap-2">
+            {[0, 1, 2, 3].map((i) => (
+              <NumberField
+                key={i}
+                label={`Cenário ${i + 1}`}
+                value={f.cenarios[i] ?? NaN}
+                onChange={(v) => setCenario(i, v)}
+                unit="L/min"
+                step={0.5}
+                compact
+              />
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            Em branco = múltiplos automáticos do tronco
+            {baseTronco > 0 ? ` (base ${baseTronco.toFixed(1)} L/min)` : ""}.
+          </p>
+
+          {pontosSistema.length >= 3 ? (
+            <QHChart
+              pontos={curvasGrafico}
+              qOp={bombaSelRes?.qOp ?? null}
+              hOp={bombaSelRes?.hOp ?? null}
+              qMin={qMinSistema}
+              qMax={qMaxSistema}
+              nomeBomba={bombaSel?.nome ?? ""}
+            />
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-ink-600 p-4 text-center text-[12px] text-zinc-500">
+              Informe ao menos 3 cenários (ou deixe todos em branco para usar os múltiplos automáticos
+              do tronco) para traçar a curva do sistema.
+            </div>
+          )}
+
+          {/* perda de carga por cenário */}
+          <div className="mt-4">
+            <div className="mb-2 text-[11px] uppercase tracking-wider text-zinc-500">
+              Perda de carga por cenário
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {pontosSistema.map(([q, h], i) => (
+                <div key={i} className="rounded-xl bg-ink-700 p-3 text-center">
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-400">Cenário {i + 1}</div>
+                  <div className="font-display text-base font-bold text-zinc-100">{q.toFixed(1)} L/min</div>
+                  <div className="font-display text-lg font-bold text-amber">{h.toFixed(3)} mca</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* detalhamento por trecho e cenário */}
+          <div className="mt-3">
+            <Accordion title="Detalhamento por trecho e cenário (validação)">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] border-collapse text-right text-[11px]">
+                  <thead>
+                    <tr className="text-zinc-400">
+                      <th className="sticky left-0 bg-ink-800 px-2 py-1 text-left font-semibold">Trecho</th>
+                      {colunasDetalhe.map((col, i) => (
+                        <th
+                          key={i}
+                          colSpan={3}
+                          className={`border-l border-ink-700 px-2 py-1 text-center font-semibold ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}
+                        >
+                          {col.titulo}
+                          <div className={`text-[10px] font-normal ${col.destaque ? "text-amber/80" : "text-zinc-500"}`}>
+                            {col.q.toFixed(2)} L/min
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                    <tr className="text-zinc-500">
+                      <th className="sticky left-0 bg-ink-800 px-2 py-1"></th>
+                      {colunasDetalhe.map((col, i) => (
+                        <Fragment key={i}>
+                          <th className={`border-l border-ink-700 px-2 py-1 font-medium ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}>Q</th>
+                          <th className={`px-2 py-1 font-medium ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}>V</th>
+                          <th className={`px-2 py-1 font-medium ${col.destaque ? "bg-amber-deep/45 text-amber" : ""}`}>h_f</th>
+                        </Fragment>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(colunasDetalhe[0]?.linhas ?? []).map((linha0, ti) => (
+                      <tr key={ti} className="border-t border-ink-700">
+                        <td className="sticky left-0 bg-ink-800 px-2 py-1 text-left text-zinc-300">
+                          {[linha0.ambiente, linha0.nome].filter(Boolean).join(" · ") || `Trecho ${ti + 1}`}
+                        </td>
+                        {colunasDetalhe.map((col, ci) => {
+                          const d = col.linhas[ti];
+                          const cor = col.destaque ? "bg-amber-deep/20 font-semibold text-amber" : "text-zinc-300";
+                          return (
+                            <Fragment key={ci}>
+                              <td className={`border-l border-ink-700 px-2 py-1 ${cor}`}>{(d?.q ?? 0).toFixed(2)}</td>
+                              <td className={`px-2 py-1 ${cor}`}>{(d?.v ?? 0).toFixed(3)}</td>
+                              <td className={`px-2 py-1 ${cor}`}>{(d?.hf ?? 0).toFixed(3)}</td>
+                            </Fragment>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-[11px] text-zinc-500">
+                Q em L/min · V em m/s · h_f em m (perda distribuída no tubo + conexões). Cada cenário
+                escala a vazão de todos os trechos proporcionalmente ao tronco.
+              </p>
+            </Accordion>
+          </div>
+
+          {/* ponto de operação × bombas (catálogo de pressurização) */}
+          <div className="mt-4 rounded-2xl border border-ink-600 bg-ink-700 p-4">
+            <h4 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+              Ponto de operação × bombas
+            </h4>
+            {temBombas ? (
+              <>
+                <SelectField
+                  label="Bomba destacada no gráfico"
+                  value={f.bombaSelecionada}
+                  onChange={(v) => set("bombaSelecionada", String(v))}
+                  options={BOMBAS_PRESSURIZACAO.map((b) => ({ value: b.nome, label: b.nome }))}
+                />
+                {bombaSelRes && (
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <Hero titulo="Vazão de operação" valor={bombaSelRes.qOp !== null ? `${bombaSelRes.qOp.toFixed(1)} L/min` : "—"} />
+                    <Hero titulo="Pressão de operação" valor={bombaSelRes.hOp !== null ? `${bombaSelRes.hOp.toFixed(2)} mca` : "—"} />
+                    <div className="flex flex-col justify-center rounded-2xl bg-ink-600 p-3">
+                      <div className="text-[11px] uppercase tracking-wider text-zinc-400">Faixa útil</div>
+                      <div className={`mt-0.5 font-display text-sm font-bold ${bombaSelRes.atende ? "text-emerald-400" : "text-red-400"}`}>
+                        {bombaSelRes.atende ? "Dentro" : "Fora"}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-left text-[12px]">
+                    <thead>
+                      <tr className="text-zinc-500">
+                        <th className="pb-2 font-medium">Bomba</th>
+                        <th className="pb-2 text-right font-medium">Q oper.</th>
+                        <th className="pb-2 text-right font-medium">P oper.</th>
+                        <th className="pb-2 text-right font-medium">Atende?</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bombasRes.map((b) => {
+                        const selecionada = b.nome === f.bombaSelecionada;
+                        return (
+                          <tr key={b.nome} className={`border-t border-ink-500 ${selecionada ? "bg-amber-deep/45 ring-1 ring-amber" : ""}`}>
+                            <td className={`py-2 pl-2 pr-2 ${selecionada ? "border-l-4 border-amber font-bold text-amber" : "text-zinc-300"}`}>{b.nome}</td>
+                            <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>{b.qOp !== null ? b.qOp.toFixed(1) : "—"}</td>
+                            <td className={`py-2 text-right ${selecionada ? "font-bold text-amber" : "text-zinc-300"}`}>{b.hOp !== null ? b.hOp.toFixed(2) : "—"}</td>
+                            <td className={`py-2 pr-2 text-right font-semibold ${selecionada ? "text-amber" : b.atende ? "text-emerald-400" : "text-zinc-600"}`}>{b.atende ? "sim" : "fora"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed border-amber/30 bg-amber/5 p-4 text-center">
+                <div className="font-display text-sm font-bold text-amber">Seleção de bomba — em breve</div>
+                <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-zinc-400">
+                  O cruzamento com a curva da bomba entra assim que você enviar o catálogo de bombas
+                  de pressurização atualizado (modelos e curvas Q × H). A curva do sistema acima já
+                  sai pronta — é só plugar as bombas.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* MEUS PROJETOS (persistência do projeto inteiro) */}
       <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
