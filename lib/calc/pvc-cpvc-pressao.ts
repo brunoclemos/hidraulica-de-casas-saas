@@ -131,7 +131,11 @@ export interface Trecho {
   material: Material;
   diametro: number; // comercial (mm)
   comprimentoReal: number; // m
-  pecas: Record<string, number>; // nome da peça -> quantidade
+  // Vazão: "pesos" = Método dos Pesos (NBR 5626, Σ pesos das peças); "manual" = digitada.
+  // (Feedback 18/jul, vídeo 1: "quero deixar o cara escolher método dos pesos OU vazão manual".)
+  modoVazao: "pesos" | "manual";
+  vazaoManualLmin: number; // L/min — usada só quando modoVazao === "manual"
+  pecas: Record<string, number>; // nome da peça -> quantidade (modo "pesos")
   conexoes: QtdConexoes; // id da conexão -> quantidade
   sobe: number; // m (elevação que sobe)
   desce: number; // m (elevação que desce)
@@ -139,6 +143,7 @@ export interface Trecho {
   // registro de pressão (RP) e válvula misturadora (só AQ)
   qtdRegistroPressao: number;
   qtdValvulaMisturadora: number; // só faz sentido em CPVC/AQ
+  kvValvula: number; // Kv da válvula misturadora (m³/h). Default 2,6 (valor da planilha do curso).
   // temperatura da água (só CPVC, define viscosidade -> Reynolds)
   temperaturaAgua: number; // °C
   pecaMinima: string; // id de PRESSAO_MINIMA para o semáforo do trecho
@@ -245,21 +250,51 @@ export function fatorAtrito(reynolds: number, rugosidadeRelativa: number): numbe
 }
 
 // ---------------------------------------------------------------------------
-// MOTOR PRINCIPAL DO TRECHO
+// VAZÃO DO TRECHO — Método dos Pesos ou valor manual (vídeo 1 do cliente 18/jul)
 // ---------------------------------------------------------------------------
 
-export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTrecho {
-  const dInt = diametroInterno(t.material, t.diametro); // mm
+/** Vazão do trecho (L/s e L/min) + soma dos pesos. Em modo "manual" usa o valor
+ *  digitado; em "pesos" (padrão / legado) usa Q[L/s] = 0.3 * sqrt(Σ pesos). */
+export function vazaoDoTrecho(t: Trecho): { ls: number; lmin: number; somaPesos: number } {
   const somaPesos = somaDosPesos(t.pecas);
+  if (t.modoVazao === "manual") {
+    const lmin = Number.isFinite(t.vazaoManualLmin) && t.vazaoManualLmin > 0 ? t.vazaoManualLmin : 0;
+    return { ls: lmin / 60, lmin, somaPesos };
+  }
+  const ls = 0.3 * Math.sqrt(somaPesos); // NBR 5626 — Método dos Pesos
+  return { ls, lmin: ls * 60, somaPesos };
+}
 
-  // Vazão estimada (NBR 5626 — Método dos Pesos): Q[L/s] = 0.3 * sqrt(Σ pesos).
-  const vazaoLs = 0.3 * Math.sqrt(somaPesos);
-  const vazaoLmin = vazaoLs * 60;
+// ---------------------------------------------------------------------------
+// PERDAS HIDRÁULICAS DO TRECHO para uma vazão ARBITRÁRIA (L/s).
+// Fatorado de calcularTrecho para ser reusado pelos cenários da curva do sistema
+// (mesma física, vazão escalada). Só depende da vazão + geometria + material.
+// ---------------------------------------------------------------------------
+
+export interface PerdasHidraulicas {
+  diametroInterno: number;
+  velocidade: number;
+  velocidadeOk: boolean;
+  compEquivalente: number;
+  compTotal: number;
+  perdaUnitaria: number;
+  perdaCargaTubulacao: number;
+  perdaCargaConexao: number;
+  perdaCargaTotal: number;
+  perdaRegistroPressao: number;
+  perdaValvulaMisturadora: number;
+  reynolds: number;
+  regime: ResultadoTrecho["regime"];
+  fatorAtrito: number;
+}
+
+export function perdasHidraulicas(t: Trecho, vazaoLs: number): PerdasHidraulicas {
+  const dInt = diametroInterno(t.material, t.diametro); // mm
+  const dIntM = dInt / 1000;
 
   // Velocidade: V = 4*(Q/1000) / (π * (Dint/1000)^2). (π = 3.14 para paridade c/ a planilha.)
-  const dIntM = dInt / 1000;
   const velocidade =
-    somaPesos > 0 && dInt > 0
+    vazaoLs > 0 && dInt > 0
       ? (4 * (vazaoLs / 1000)) / (PI_PLANILHA * Math.pow(dIntM, 2))
       : 0;
   const velocidadeOk = velocidade <= 3; // alerta de velocidade > 3 m/s
@@ -324,26 +359,16 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
         t.qtdRegistroPressao
       : 0;
 
-  // Válvula misturadora (SÓ AQ/CPVC): hf = (((Q*3.6)/2.6)^2 * 10) * qtd.
+  // Válvula misturadora (SÓ AQ/CPVC): hf = (((Q*3.6)/Kv)^2 * 10) * qtd.
+  // Kv editável (vídeo 3 do cliente); fallback 2,6 (valor da planilha) se ausente/inválido.
+  const kv = Number.isFinite(t.kvValvula) && t.kvValvula > 0 ? t.kvValvula : 2.6;
   const perdaValvulaMisturadora =
-    t.material === "CPVC" && vazaoLs > 0 && t.qtdValvulaMisturadora > 0
-      ? Math.pow((vazaoLs * 3.6) / 2.6, 2) * 10 * t.qtdValvulaMisturadora
+    t.material === "CPVC" && vazaoLs > 0 && t.qtdValvulaMisturadora > 0 && kv > 0
+      ? Math.pow((vazaoLs * 3.6) / kv, 2) * 10 * t.qtdValvulaMisturadora
       : 0;
-
-  // --- pressões ---
-  const desnivel = t.desce - t.sobe; // paridade c/ a planilha: subir perde pressão
-  const pressaoDisponivel = desnivel + t.incrementoPressurizador + residualAnterior;
-  const pressaoResidual =
-    pressaoDisponivel - perdaCargaTotal - perdaRegistroPressao - perdaValvulaMisturadora;
-
-  const pmin = PRESSAO_MINIMA.find((p) => p.id === t.pecaMinima)?.mca ?? 1;
-  const residualOk = pressaoResidual >= pmin;
 
   return {
     diametroInterno: dInt,
-    somaPesos,
-    vazaoLs,
-    vazaoLmin,
     velocidade,
     velocidadeOk,
     compEquivalente,
@@ -354,14 +379,52 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
     perdaCargaTotal,
     perdaRegistroPressao,
     perdaValvulaMisturadora,
+    reynolds,
+    regime,
+    fatorAtrito: fatorAtritoVal,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// MOTOR PRINCIPAL DO TRECHO
+// ---------------------------------------------------------------------------
+
+export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTrecho {
+  const { ls: vazaoLs, lmin: vazaoLmin, somaPesos } = vazaoDoTrecho(t);
+  const p = perdasHidraulicas(t, vazaoLs);
+
+  // --- pressões ---
+  const desnivel = t.desce - t.sobe; // paridade c/ a planilha: subir perde pressão
+  const pressaoDisponivel = desnivel + t.incrementoPressurizador + residualAnterior;
+  const pressaoResidual =
+    pressaoDisponivel - p.perdaCargaTotal - p.perdaRegistroPressao - p.perdaValvulaMisturadora;
+
+  const pmin = PRESSAO_MINIMA.find((x) => x.id === t.pecaMinima)?.mca ?? 1;
+  const residualOk = pressaoResidual >= pmin;
+
+  return {
+    diametroInterno: p.diametroInterno,
+    somaPesos,
+    vazaoLs,
+    vazaoLmin,
+    velocidade: p.velocidade,
+    velocidadeOk: p.velocidadeOk,
+    compEquivalente: p.compEquivalente,
+    compTotal: p.compTotal,
+    perdaUnitaria: p.perdaUnitaria,
+    perdaCargaTubulacao: p.perdaCargaTubulacao,
+    perdaCargaConexao: p.perdaCargaConexao,
+    perdaCargaTotal: p.perdaCargaTotal,
+    perdaRegistroPressao: p.perdaRegistroPressao,
+    perdaValvulaMisturadora: p.perdaValvulaMisturadora,
     desnivel,
     pressaoDisponivel,
     pressaoResidual,
     pressaoMinima: pmin,
     residualOk,
-    reynolds,
-    regime,
-    fatorAtrito: fatorAtritoVal,
+    reynolds: p.reynolds,
+    regime: p.regime,
+    fatorAtrito: p.fatorAtrito,
   };
 }
 
@@ -387,6 +450,10 @@ export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): 
     material,
     diametro: num(raw?.diametro, base.diametro),
     comprimentoReal: num(raw?.comprimentoReal, base.comprimentoReal),
+    // campos novos (feedback 18/jul): default retrocompatível — projeto antigo =
+    // Método dos Pesos e Kv 2,6 (= comportamento anterior, resultado idêntico).
+    modoVazao: raw?.modoVazao === "manual" ? "manual" : "pesos",
+    vazaoManualLmin: num(raw?.vazaoManualLmin, 0),
     pecas: raw?.pecas && typeof raw.pecas === "object" ? raw.pecas : {},
     conexoes: raw?.conexoes && typeof raw.conexoes === "object" ? raw.conexoes : {},
     sobe: num(raw?.sobe, 0),
@@ -394,6 +461,7 @@ export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): 
     incrementoPressurizador: num(raw?.incrementoPressurizador, 0),
     qtdRegistroPressao: num(raw?.qtdRegistroPressao, 0),
     qtdValvulaMisturadora: num(raw?.qtdValvulaMisturadora, 0),
+    kvValvula: num(raw?.kvValvula, 2.6),
     temperaturaAgua: num(raw?.temperaturaAgua, base.temperaturaAgua),
     pecaMinima: typeof raw?.pecaMinima === "string" ? raw.pecaMinima : base.pecaMinima,
     // campo novo: projetos antigos guardavam tudo em `nome` -> herdamos como ambiente vazio.
@@ -422,6 +490,8 @@ export function trechoPadrao(material: Material): Trecho {
     material,
     diametro: material === "PVC" ? 25 : 22,
     comprimentoReal: 3,
+    modoVazao: "pesos",
+    vazaoManualLmin: 0,
     pecas: {},
     conexoes: {},
     sobe: 0,
@@ -429,7 +499,77 @@ export function trechoPadrao(material: Material): Trecho {
     incrementoPressurizador: 0,
     qtdRegistroPressao: 0,
     qtdValvulaMisturadora: 0,
+    kvValvula: 2.6,
     temperaturaAgua: 40,
     pecaMinima: "chuveiro",
   };
 }
+
+// ---------------------------------------------------------------------------
+// CURVA DO SISTEMA & CENÁRIOS (vídeos 4 e 5 do cliente 18/jul) — mesma ideia do
+// "Cálculo de Circuladores": escala a vazão de TODOS os trechos proporcionalmente
+// à 1ª inserção (tronco) e soma a perda de carga; a curva vira H = a + b·Q + c·Q².
+// ---------------------------------------------------------------------------
+
+/** Vazão-base do tronco (1ª inserção) em L/min — referência de escala dos cenários. */
+export function vazaoTroncoBase(trechos: Trecho[] | undefined | null): number {
+  const t0 = trechos?.[0];
+  return t0 ? vazaoDoTrecho(t0).lmin : 0;
+}
+
+/** Perda de carga TOTAL do projeto (mca) para uma vazão de tronco (L/min), escalando
+ *  todos os trechos proporcionalmente à vazão-base da 1ª inserção. */
+export function perdaProjetoEmVazao(trechos: Trecho[], vazaoTroncoLmin: number): number {
+  const base = vazaoTroncoBase(trechos);
+  if (!(base > 0)) return 0;
+  const fator = vazaoTroncoLmin / base;
+  let total = 0;
+  for (const t of trechos) {
+    const ls = vazaoDoTrecho(t).ls * fator;
+    const p = perdasHidraulicas(t, ls);
+    total += p.perdaCargaTotal + p.perdaRegistroPressao + p.perdaValvulaMisturadora;
+  }
+  return total;
+}
+
+export interface DetalheProjetoTrecho {
+  ambiente: string;
+  nome: string;
+  q: number; // L/min (escalado ao cenário)
+  v: number; // m/s
+  hf: number; // mca (perda distribuída tubo+conexões, como no Circuladores)
+}
+
+/** Vazão (L/min) que produz uma velocidade-alvo (m/s) num tubo de Ø interno dado (mm).
+ *  Inverso da velocidade do módulo — usa π = 3,14 (paridade com a planilha do curso). */
+export function vazaoParaVelocidadeLmin(velAlvo: number, dnInternoMm: number): number {
+  if (dnInternoMm <= 0 || !Number.isFinite(velAlvo) || velAlvo <= 0) return 0;
+  const dIntM = dnInternoMm / 1000;
+  // V = 4*(Q_Ls/1000)/(π·dIntM²)  ->  Q_Ls = V·π·dIntM²/4·1000 ; L/min = Q_Ls·60
+  return ((velAlvo * PI_PLANILHA * Math.pow(dIntM, 2)) / 4) * 1000 * 60;
+}
+
+/** Detalhamento por trecho (Q, V, h_f distribuída) para uma vazão de tronco (L/min). */
+export function detalheProjetoEmVazao(
+  trechos: TrechoSalvo[],
+  vazaoTroncoLmin: number,
+): DetalheProjetoTrecho[] {
+  const base = vazaoTroncoBase(trechos);
+  return (trechos ?? []).map((t) => {
+    const ls = base > 0 ? vazaoDoTrecho(t).ls * (vazaoTroncoLmin / base) : 0;
+    const p = perdasHidraulicas(t, ls);
+    return { ambiente: t.ambiente, nome: t.nome, q: ls * 60, v: p.velocidade, hf: p.perdaCargaTotal };
+  });
+}
+
+// Catálogo de bombas de PRESSURIZAÇÃO (pontos Q [L/min] × H [mca] das curvas oficiais).
+// VAZIO até o cliente enviar os modelos atualizados (feedback 18/jul, vídeo 4:
+// "as bombas eu preciso te mandar as atualizadas — pro dimensionamento lá são outros
+// tipos de bomba"). Enquanto vazio, a seção de seleção fica em modo "aguardando
+// catálogo" e NÃO mostra número de bomba (evita resultado errado).
+//
+// PENDENTE DE ENGENHARIA ao plugar as bombas — confirmar com o Ferreto: a curva do
+// sistema em PRESSURIZAÇÃO deve somar, além da perda de carga, a altura estática
+// (desnível líquido) + a pressão mínima no ponto − a pressão disponível na entrada.
+// No circulador (anel fechado) esse termo é ~0; aqui NÃO é. Espelhar a planilha nova.
+export const BOMBAS_PRESSURIZACAO: { nome: string; pontos: [number, number][] }[] = [];
