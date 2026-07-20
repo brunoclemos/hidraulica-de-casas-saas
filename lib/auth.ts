@@ -11,6 +11,7 @@ const VALIDAR_URL = process.env.NEXT_PUBLIC_VALIDAR_ALUNO_URL || "";
 const ACESSO_INTERNO = new Set<string>([
   "brunoclemos1997@gmail.com",
   "contato@ferretoengenharia.com.br",
+  "matheus.henriquecv@gmail.com",
 ]);
 
 export interface Sessao {
