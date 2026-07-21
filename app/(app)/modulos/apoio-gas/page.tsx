@@ -108,6 +108,23 @@ export default function ApoioGas() {
     refresh();
   }
 
+  function salvarComoNovo() {
+    setEstado("salvando");
+    const p = salvarProjeto<InputsSalvos>({
+      id: undefined,
+      modulo: MODULO,
+      cliente: cliente.trim() || undefined,
+      nome: nome.trim() || "Sem nome",
+      inputs: persistiveis(),
+    });
+    setProjetoId(p.id);
+    setNome(p.nome);
+    snapshot.current = JSON.stringify({ f, precos });
+    setSalvoEm(p.atualizadoEm);
+    setEstado("salvo");
+    refresh();
+  }
+
   function carregar(p: Projeto) {
     const { precos: pr, ...campos } = p.inputs as InputsSalvos;
     const form = { ...PADRAO, ...campos };
@@ -562,10 +579,10 @@ export default function ApoioGas() {
           </div>
           {projetoId && (
             <button
-              onClick={novo}
+              onClick={salvarComoNovo}
               className="rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400"
             >
-              Novo
+              Salvar como novo
             </button>
           )}
           <button

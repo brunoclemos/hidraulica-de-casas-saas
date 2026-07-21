@@ -110,6 +110,23 @@ export default function VasoExpansao() {
     refresh();
   }
 
+  function salvarComoNovo() {
+    setEstado("salvando");
+    const p = salvarProjeto<Form>({
+      id: undefined,
+      modulo: MODULO,
+      cliente: cliente.trim() || undefined,
+      nome: nome.trim() || "Sem nome",
+      inputs: f,
+    });
+    setProjetoId(p.id);
+    setNome(p.nome);
+    snapshot.current = JSON.stringify(f);
+    setSalvoEm(p.atualizadoEm);
+    setEstado("salvo");
+    refresh();
+  }
+
   function carregar(p: Projeto) {
     setF(p.inputs as Form);
     setProjetoId(p.id);
@@ -389,10 +406,10 @@ export default function VasoExpansao() {
           </div>
           {projetoId && (
             <button
-              onClick={novo}
+              onClick={salvarComoNovo}
               className="rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400"
             >
-              Novo
+              Salvar como novo
             </button>
           )}
           <button

@@ -73,6 +73,11 @@ export default function TempoEspera() {
     const p = salvarProjeto<Form>({ id: projetoId ?? undefined, modulo: MODULO, cliente: cliente.trim() || undefined, nome: nome.trim() || "Sem nome", inputs: f });
     setProjetoId(p.id); setNome(p.nome); snapshot.current = JSON.stringify(f); setSalvoEm(p.atualizadoEm); setEstado("salvo"); refresh();
   }
+  function salvarComoNovo() {
+    setEstado("salvando");
+    const p = salvarProjeto<Form>({ id: undefined, modulo: MODULO, cliente: cliente.trim() || undefined, nome: nome.trim() || "Sem nome", inputs: f });
+    setProjetoId(p.id); setNome(p.nome); snapshot.current = JSON.stringify(f); setSalvoEm(p.atualizadoEm); setEstado("salvo"); refresh();
+  }
   function carregar(p: Projeto) { setF(p.inputs as Form); setProjetoId(p.id); setCliente(p.cliente ?? ""); setNome(p.nome); snapshot.current = JSON.stringify(p.inputs); setSalvoEm(p.atualizadoEm); setEstado("salvo"); }
   function novo() { setF(PADRAO); setProjetoId(null); setCliente(""); setNome(""); snapshot.current = ""; setSalvoEm(null); setEstado("nao-salvo"); }
 
@@ -179,7 +184,7 @@ export default function TempoEspera() {
             <ClienteField value={cliente} onChange={setCliente} sugestoes={clientesSug} className="w-28 shrink-0 sm:w-40" />
             <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome do cálculo (ex.: Espera)" className="min-w-0 flex-1 rounded-xl border border-ink-600 bg-ink-800 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber/60" />
           </div>
-          {projetoId && (<button onClick={novo} className="rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400">Novo</button>)}
+          {projetoId && (<button onClick={salvarComoNovo} className="rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400">Salvar como novo</button>)}
           <button onClick={salvar} className="rounded-xl bg-amber px-5 py-2.5 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-95">{projetoId ? "Atualizar" : "Salvar projeto"}</button>
         </div>
       </div>
