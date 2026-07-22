@@ -17,6 +17,9 @@ import {
   detalheProjetoEmVazao,
   vazaoParaVelocidadeLmin,
   BOMBAS_PRESSURIZACAO,
+  MONOCOMANDOS,
+  CHUVEIROS,
+  FILTRO_Y_KV,
   Material,
   TrechoSalvo,
 } from "@/lib/calc/pvc-cpvc-pressao";
@@ -570,7 +573,7 @@ export default function PvcCpvcPressao() {
           </div>
         </Accordion>
 
-        <Accordion title="Registro de pressão & válvula">
+        <Accordion title="Registros, válvulas & equipamentos">
           <div className="grid grid-cols-2 gap-4">
             <Stepper
               label="Registro de pressão (qtd)"
@@ -599,13 +602,97 @@ export default function PvcCpvcPressao() {
                 hint="Coef. de vazão da válvula misturadora (planilha do curso usa 2,6)."
               />
             )}
+            {/* Feedback 21/jul (vídeo 1): monocomando com perda pela curva DOCOL. */}
+            <SelectField
+              label="Monocomando (curva DOCOL)"
+              value={draft.monocomando}
+              onChange={(v) => setDraftPatch({ monocomando: String(v) })}
+              options={[
+                { value: "", label: "Nenhum" },
+                ...MONOCOMANDOS.map((m) => ({ value: m.id, label: m.nome })),
+              ]}
+            />
+            {/* Feedback 21/jul: filtro Y com perda por Kv da bitola. */}
+            <Stepper
+              label="Filtro Y (qtd)"
+              value={draft.qtdFiltroY}
+              onChange={(v) => setDraftPatch({ qtdFiltroY: v })}
+              min={0}
+              max={10}
+            />
+            {draft.qtdFiltroY > 0 && (
+              <SelectField
+                label="Bitola do filtro Y"
+                value={draft.bitolaFiltroY}
+                onChange={(v) => setDraftPatch({ bitolaFiltroY: String(v) })}
+                options={FILTRO_Y_KV.map((b) => ({ value: b.bitola, label: `${b.bitola} (Kv ${b.kv})` }))}
+                hint="Kv preliminar lido do gráfico do fabricante."
+              />
+            )}
             <SelectField
               label="Peça crítica (mínimo)"
               value={draft.pecaMinima}
               onChange={(v) => setDraftPatch({ pecaMinima: String(v) })}
               options={PRESSAO_MINIMA.map((p) => ({ value: p.id, label: `${p.nome} (${p.mca} mca)` }))}
             />
+            {/* Feedback 21/jul (vídeo 3): a curva do chuveiro entra na exigência do ponto. */}
+            <SelectField
+              label="Chuveiro no ponto (curva)"
+              value={draft.chuveiro}
+              onChange={(v) => setDraftPatch({ chuveiro: String(v) })}
+              options={[
+                { value: "", label: "Nenhum" },
+                { value: "manual", label: "Manual (digitar a perda)" },
+                ...CHUVEIROS.map((c) => ({ value: c.id, label: c.nome })),
+              ]}
+              hint="Curvas Docol/Deca do PDF do cliente; Manual cobre outros modelos."
+            />
+            {draft.chuveiro === "manual" && (
+              <NumberField
+                label="Perda do chuveiro"
+                value={draft.perdaChuveiroManual}
+                onChange={(v) => setDraftPatch({ perdaChuveiroManual: v })}
+                unit="mca"
+                step={0.5}
+                hint="Perda de carga do chuveiro na vazão de projeto (da curva do fabricante)."
+              />
+            )}
           </div>
+
+          {/* leitura ao vivo das perdas dos equipamentos ("aparecer na aba", vídeo 1) */}
+          {(draft.monocomando || draft.qtdFiltroY > 0 || draft.chuveiro) && (
+            <div className="mt-3 space-y-1 rounded-xl border border-ink-600 bg-ink-900/40 px-3 py-2 text-[12px] text-zinc-400">
+              {draft.monocomando && (
+                <div>
+                  Perda do monocomando em {r.vazaoLmin.toFixed(1)} L/min:{" "}
+                  <span className="font-semibold text-amber">{r.perdaMonocomando.toFixed(2)} mca</span>
+                  {r.monocomandoAcima && (
+                    <span className="block text-amber">
+                      Vazão acima do alcance da curva — perda subestimada, revise a bitola/tipo.
+                    </span>
+                  )}
+                </div>
+              )}
+              {draft.qtdFiltroY > 0 && (
+                <div>
+                  Perda do filtro Y ({draft.qtdFiltroY}× {draft.bitolaFiltroY}):{" "}
+                  <span className="font-semibold text-amber">{r.perdaFiltroY.toFixed(2)} mca</span>
+                </div>
+              )}
+              {draft.chuveiro && (
+                <div>
+                  Exigência no ponto: mínimo {(r.pressaoMinima - r.perdaChuveiro).toFixed(1)} +
+                  chuveiro {r.perdaChuveiro.toFixed(2)} ={" "}
+                  <span className="font-semibold text-amber">{r.pressaoMinima.toFixed(2)} mca</span>
+                  {r.chuveiroAcima && (
+                    <span className="block text-amber">
+                      Vazão acima do que este chuveiro atinge — nenhuma pressão entrega essa vazão.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </Accordion>
 
         <Accordion title="Ambiente & trecho" defaultOpen>
@@ -676,6 +763,13 @@ export default function PvcCpvcPressao() {
             )}
             <Det l="Perda registro RP" v={`${r.perdaRegistroPressao.toFixed(4)} mca`} />
             {isAQ && <Det l="Perda válv. mist." v={`${r.perdaValvulaMisturadora.toFixed(4)} mca`} />}
+            {draft.monocomando !== "" && (
+              <Det l="Perda monocomando" v={`${r.perdaMonocomando.toFixed(4)} mca`} />
+            )}
+            {draft.qtdFiltroY > 0 && <Det l="Perda filtro Y" v={`${r.perdaFiltroY.toFixed(4)} mca`} />}
+            {draft.chuveiro !== "" && (
+              <Det l="Exigência chuveiro" v={`${r.perdaChuveiro.toFixed(2)} mca`} />
+            )}
             <Det l="Desnível" v={`${r.desnivel.toFixed(2)} m`} />
             <Det l="Pressão disponível" v={`${r.pressaoDisponivel.toFixed(2)} mca`} />
           </div>

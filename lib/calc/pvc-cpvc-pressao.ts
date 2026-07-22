@@ -148,6 +148,17 @@ export interface Trecho {
   qtdRegistroPressao: number;
   qtdValvulaMisturadora: number; // só faz sentido em CPVC/AQ
   kvValvula: number; // Kv da válvula misturadora (m³/h). Default 2,6 (valor da planilha do curso).
+  // Monocomando no trecho (feedback 21/jul, vídeo 1): id do catálogo MONOCOMANDOS,
+  // "" = nenhum. A perda vem da curva DOCOL na vazão do trecho, máx. 1 por trecho
+  // (o trecho termina no ponto de uso).
+  monocomando: string;
+  // Filtro Y (feedback 21/jul): perda por Kv da bitola, mesma fórmula da válvula.
+  qtdFiltroY: number;
+  bitolaFiltroY: string; // chave de FILTRO_Y_KV
+  // Chuveiro no ponto (feedback 21/jul, vídeo 3): id do catálogo CHUVEIROS, "" = nenhum,
+  // "manual" = perda digitada. Soma na EXIGÊNCIA mínima do ponto, não na perda do trecho.
+  chuveiro: string;
+  perdaChuveiroManual: number; // mca — usada só quando chuveiro === "manual"
   // temperatura da água (só CPVC, define viscosidade -> Reynolds)
   temperaturaAgua: number; // °C
   pecaMinima: string; // id de PRESSAO_MINIMA para o semáforo do trecho
@@ -168,15 +179,136 @@ export interface ResultadoTrecho {
   perdaCargaTotal: number; // mca (perda no tubo+conexões)
   perdaRegistroPressao: number; // mca
   perdaValvulaMisturadora: number; // mca
+  perdaMonocomando: number; // mca (feedback 21/jul)
+  monocomandoAcima: boolean; // vazão acima do alcance da curva do monocomando
+  perdaFiltroY: number; // mca (feedback 21/jul)
+  perdaChuveiro: number; // mca somada na exigência do ponto (feedback 21/jul)
+  chuveiroAcima: boolean; // vazão acima do alcance da curva do chuveiro
   desnivel: number; // m (sobe - desce)
   pressaoDisponivel: number; // mca
   pressaoResidual: number; // mca
-  pressaoMinima: number; // mca de referência da peça do trecho
+  pressaoMinima: number; // mca exigida no ponto (mínimo da peça + chuveiro)
   residualOk: boolean; // residual >= mínima
   // extras CPVC (Darcy-Weisbach)
   reynolds: number;
   regime: "Laminar" | "Reg. Transição" | "Turbulento" | "—";
   fatorAtrito: number;
+}
+
+// ---------------------------------------------------------------------------
+// CURVAS DE VAZÃO DE EQUIPAMENTOS (feedback 21/jul) — pontos [pressão mca, vazão
+// L/min] em pressão crescente, como publicados pelo fabricante (Q em função de P).
+// O app usa o INVERSO (perda em função da vazão) via perdaPorCurvaVazao.
+// ---------------------------------------------------------------------------
+
+export interface CurvaVazao {
+  id: string;
+  nome: string;
+  pontos: [number, number][]; // [mca, L/min]
+}
+
+// Monocomandos DOCOL — curvas enviadas pelo cliente 21/jul (digitalizadas das
+// imagens oficiais, erro de leitura ~±3%).
+export const MONOCOMANDOS: CurvaVazao[] = [
+  {
+    id: "baixa_pressao",
+    nome: "Monocomando baixa pressão (DOCOL)",
+    pontos: [[2, 17.8], [4, 23], [6, 27], [8, 31], [10, 33.5], [14, 40.5], [18, 46], [22, 50.5], [26, 55.5], [30, 59.5], [34, 63], [40, 69]],
+  },
+  {
+    id: "alta_pressao",
+    nome: "Monocomando alta pressão (DOCOL)",
+    pontos: [[4, 15.6], [6, 18], [8, 20.7], [10, 23], [12, 25.2], [16, 29.5], [20, 33.3], [24, 36.9], [28, 40], [32, 43], [36, 45.5], [40, 47.7]],
+  },
+  {
+    id: "quatro_vias_banheira",
+    nome: "Monocomando 4 vias — saída banheira (DOCOL)",
+    pontos: [[5, 13.2], [10, 17.2], [14, 20], [18, 22.7], [22, 25.2], [26, 27.3], [30, 29.4], [34, 31.3], [40, 34.2]],
+  },
+  {
+    id: "quatro_vias_chuveiro",
+    nome: "Monocomando 4 vias — saída chuveiro (DOCOL)",
+    pontos: [[5, 13.2], [10, 17.2], [14, 20], [18, 22.6], [22, 25], [26, 27], [30, 28.9], [34, 30.6], [40, 33.2]],
+  },
+];
+
+// Chuveiros Docol/Deca — pontos exatos do PDF de curvas enviado pelo cliente 22/jul.
+// Linhas Deca Flex/Quadrado só publicam mín/máx da ficha técnica (2 pontos).
+export const CHUVEIROS: CurvaVazao[] = [
+  { id: "docoleden150_sem", nome: "DocolEden 150 — sem restritor", pontos: [[1, 10.3], [2, 13], [4, 15.3], [6, 19], [8, 21.5], [10, 23.5], [14, 26.5], [18, 29.5], [22, 32], [26, 35], [30, 37.5], [34, 40], [38, 41.2], [40, 42.7]] },
+  { id: "docoleden150_com", nome: "DocolEden 150 — com restritor", pontos: [[1, 6], [2, 8], [4, 10], [6, 12], [10, 12.2], [14, 12], [18, 12], [22, 12.2], [26, 11.8], [30, 12], [34, 12.2], [40, 12]] },
+  { id: "mixmatch_sem", nome: "Docol Mix&Match parede — sem regulador", pontos: [[2, 20], [10, 32]] },
+  { id: "mixmatch_com", nome: "Docol Mix&Match parede — com regulador", pontos: [[10, 12], [14, 15.5], [18, 18], [20, 19], [24, 20.3], [26, 21], [30, 21.3], [34, 21.7], [40, 22]] },
+  { id: "docolrain", nome: "DocolRain Mix&Match — regulador 22 L/min", pontos: [[2, 9.5], [6, 12.5], [10, 15], [14, 16.7], [18, 18.5], [22, 20], [26, 21], [30, 21.2], [34, 21], [38, 20.8], [40, 21]] },
+  { id: "technoshower_sem", nome: "Novo Technoshower — sem restritor", pontos: [[2, 12.2], [4, 17], [6, 20], [8, 23], [10, 25.5], [14, 30.5], [18, 34.5], [22, 37.5], [26, 41], [30, 43.5], [34, 46], [36, 47.2], [40, 50.5]] },
+  { id: "technoshower_com", nome: "Novo Technoshower — com restritor", pontos: [[2, 9], [4, 11.5], [6, 12.7], [8, 13], [10, 13], [14, 12.5], [18, 12.6], [22, 12.3], [26, 12], [30, 11.3], [34, 11.3], [40, 11.3]] },
+  { id: "docolheaven_sem", nome: "DocolHeaven Q200 teto — sem regulador", pontos: [[2, 7.5], [6, 14], [10, 18.5], [14, 21.5], [18, 24], [22, 26.5], [26, 28.5], [30, 30.5], [34, 32.3], [40, 34.2]] },
+  { id: "docolheaven_com", nome: "DocolHeaven Q200 teto — com regulador", pontos: [[2, 4.5], [6, 7.7], [10, 10], [14, 11.7], [18, 13], [22, 14], [26, 15], [30, 15.7], [34, 16.2], [40, 16.5]] },
+  { id: "deca_acqua_plus", nome: "Deca Acqua Plus", pontos: [[2, 14], [10, 28], [20, 41], [30, 51], [40, 60]] },
+  { id: "deca_aquamax", nome: "Deca Aquamax", pontos: [[2, 12], [10, 22], [20, 33], [30, 41], [40, 47.5]] },
+  { id: "deca_flex_max", nome: "Deca Flex Max (limitador, mín/máx)", pontos: [[2, 9], [40, 12]] },
+  { id: "deca_flex_plus", nome: "Deca Flex Plus (limitador, mín/máx)", pontos: [[2, 9], [40, 12]] },
+  { id: "deca_quadrado", nome: "Deca Quadrado (mín/máx)", pontos: [[2, 12], [40, 60]] },
+];
+
+// Filtro Y — Kv por bitola lido do gráfico log-log do fabricante (Q = Kv·√ΔP;
+// Kv = vazão em m³/h a 1 bar). PRELIMINAR (±15%, leitura de foto) — refinar
+// quando o cliente mandar o datasheet.
+export const FILTRO_Y_KV: { bitola: string; kv: number }[] = [
+  { bitola: '1/2"', kv: 3 },
+  { bitola: '3/4"', kv: 6.3 },
+  { bitola: '1"', kv: 9.5 },
+  { bitola: '1.1/4"', kv: 15 },
+  { bitola: '1.1/2"', kv: 24 },
+  { bitola: '2"', kv: 35 },
+  { bitola: '2.1/2"', kv: 95 },
+  { bitola: '3"', kv: 140 },
+];
+
+export interface PerdaCurva {
+  perda: number; // mca
+  acima: boolean; // vazão acima do máximo que a curva publicada atinge
+}
+
+/** Perda de carga (mca) pra uma vazão (L/min) invertendo a curva publicada Q(P).
+ *  Interpola linear no envelope monotônico (curvas com restritor têm platô — acima
+ *  dele a vazão é inatingível: clampa no fim do envelope e sinaliza `acima` pro
+ *  alerta da UI). Abaixo do 1º ponto, extrapola P = P0·(Q/Q0)² (forma Q ∝ √P). */
+export function perdaPorCurvaVazao(pontos: [number, number][], vazaoLmin: number): PerdaCurva {
+  if (!(vazaoLmin > 0) || pontos.length === 0) return { perda: 0, acima: false };
+  // envelope monotônico: só os pontos que aumentam a vazão máxima já atingida
+  let qMax = -Infinity;
+  const env: [number, number][] = [];
+  for (const [p, q] of pontos) {
+    if (q > qMax) {
+      qMax = q;
+      env.push([p, q]);
+    }
+  }
+  const [p0, q0] = env[0];
+  const [pN, qN] = env[env.length - 1];
+  if (vazaoLmin <= q0) return { perda: p0 * Math.pow(vazaoLmin / q0, 2), acima: false };
+  if (vazaoLmin > qN) return { perda: pN, acima: true };
+  for (let i = 1; i < env.length; i++) {
+    const [pa, qa] = env[i - 1];
+    const [pb, qb] = env[i];
+    if (vazaoLmin <= qb) {
+      return { perda: pa + ((vazaoLmin - qa) / (qb - qa)) * (pb - pa), acima: false };
+    }
+  }
+  return { perda: pN, acima: false };
+}
+
+/** Exigência extra do chuveiro no ponto (vídeo 3, 21/jul): pressão que o chuveiro
+ *  pede na vazão do trecho — curva do fabricante ou perda digitada ("manual"). */
+export function perdaDoChuveiro(t: Trecho, vazaoLmin: number): PerdaCurva {
+  if (t.chuveiro === "manual") {
+    const v = Number.isFinite(t.perdaChuveiroManual) && t.perdaChuveiroManual > 0 ? t.perdaChuveiroManual : 0;
+    return { perda: v, acima: false };
+  }
+  const c = CHUVEIROS.find((x) => x.id === t.chuveiro);
+  if (!c) return { perda: 0, acima: false };
+  return perdaPorCurvaVazao(c.pontos, vazaoLmin);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +419,9 @@ export interface PerdasHidraulicas {
   perdaCargaTotal: number;
   perdaRegistroPressao: number;
   perdaValvulaMisturadora: number;
+  perdaMonocomando: number; // mca (curva DOCOL na vazão do trecho)
+  monocomandoAcima: boolean; // vazão acima do alcance da curva
+  perdaFiltroY: number; // mca (Kv da bitola)
   reynolds: number;
   regime: ResultadoTrecho["regime"];
   fatorAtrito: number;
@@ -371,6 +506,17 @@ export function perdasHidraulicas(t: Trecho, vazaoLs: number): PerdasHidraulicas
       ? Math.pow((vazaoLs * 3.6) / kv, 2) * 10 * t.qtdValvulaMisturadora
       : 0;
 
+  // Monocomando (feedback 21/jul): perda pela curva DOCOL na vazão do trecho.
+  const curvaMono = MONOCOMANDOS.find((m) => m.id === t.monocomando);
+  const mono = curvaMono ? perdaPorCurvaVazao(curvaMono.pontos, vazaoLs * 60) : { perda: 0, acima: false };
+
+  // Filtro Y (feedback 21/jul): mesma fórmula Kv da válvula, Kv por bitola.
+  const kvFiltro = FILTRO_Y_KV.find((b) => b.bitola === t.bitolaFiltroY)?.kv ?? 0;
+  const perdaFiltroY =
+    vazaoLs > 0 && t.qtdFiltroY > 0 && kvFiltro > 0
+      ? Math.pow((vazaoLs * 3.6) / kvFiltro, 2) * 10 * t.qtdFiltroY
+      : 0;
+
   return {
     diametroInterno: dInt,
     velocidade,
@@ -383,6 +529,9 @@ export function perdasHidraulicas(t: Trecho, vazaoLs: number): PerdasHidraulicas
     perdaCargaTotal,
     perdaRegistroPressao,
     perdaValvulaMisturadora,
+    perdaMonocomando: mono.perda,
+    monocomandoAcima: mono.acima,
+    perdaFiltroY,
     reynolds,
     regime,
     fatorAtrito: fatorAtritoVal,
@@ -401,9 +550,18 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
   const desnivel = t.desce - t.sobe; // paridade c/ a planilha: subir perde pressão
   const pressaoDisponivel = desnivel + t.incrementoPressurizador + residualAnterior;
   const pressaoResidual =
-    pressaoDisponivel - p.perdaCargaTotal - p.perdaRegistroPressao - p.perdaValvulaMisturadora;
+    pressaoDisponivel -
+    p.perdaCargaTotal -
+    p.perdaRegistroPressao -
+    p.perdaValvulaMisturadora -
+    p.perdaMonocomando -
+    p.perdaFiltroY;
 
-  const pmin = PRESSAO_MINIMA.find((x) => x.id === t.pecaMinima)?.mca ?? 1;
+  // Exigência do ponto (feedback 21/jul): mínimo da peça + pressão que o chuveiro
+  // pede na vazão (ex.: chuveiro 1 mca + curva 12 mca = 13 mca exigidos).
+  const pminPeca = PRESSAO_MINIMA.find((x) => x.id === t.pecaMinima)?.mca ?? 1;
+  const chuveiroCalc = perdaDoChuveiro(t, vazaoLmin);
+  const pmin = pminPeca + chuveiroCalc.perda;
   const residualOk = pressaoResidual >= pmin;
 
   return {
@@ -421,6 +579,11 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
     perdaCargaTotal: p.perdaCargaTotal,
     perdaRegistroPressao: p.perdaRegistroPressao,
     perdaValvulaMisturadora: p.perdaValvulaMisturadora,
+    perdaMonocomando: p.perdaMonocomando,
+    monocomandoAcima: p.monocomandoAcima,
+    perdaFiltroY: p.perdaFiltroY,
+    perdaChuveiro: chuveiroCalc.perda,
+    chuveiroAcima: chuveiroCalc.acima,
     desnivel,
     pressaoDisponivel,
     pressaoResidual,
@@ -468,6 +631,12 @@ export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): 
     qtdRegistroPressao: num(raw?.qtdRegistroPressao, 0),
     qtdValvulaMisturadora: num(raw?.qtdValvulaMisturadora, 0),
     kvValvula: num(raw?.kvValvula, 2.6),
+    // campos novos (feedback 21/jul): default vazio/zero = projeto antigo calcula idêntico.
+    monocomando: typeof raw?.monocomando === "string" ? raw.monocomando : "",
+    qtdFiltroY: num(raw?.qtdFiltroY, 0),
+    bitolaFiltroY: typeof raw?.bitolaFiltroY === "string" ? raw.bitolaFiltroY : '3/4"',
+    chuveiro: typeof raw?.chuveiro === "string" ? raw.chuveiro : "",
+    perdaChuveiroManual: num(raw?.perdaChuveiroManual, 0),
     temperaturaAgua: num(raw?.temperaturaAgua, base.temperaturaAgua),
     pecaMinima: typeof raw?.pecaMinima === "string" ? raw.pecaMinima : base.pecaMinima,
     // campo novo: projetos antigos guardavam tudo em `nome` -> herdamos como ambiente vazio.
@@ -507,6 +676,11 @@ export function trechoPadrao(material: Material): Trecho {
     qtdRegistroPressao: 0,
     qtdValvulaMisturadora: 0,
     kvValvula: 2.6,
+    monocomando: "",
+    qtdFiltroY: 0,
+    bitolaFiltroY: '3/4"',
+    chuveiro: "",
+    perdaChuveiroManual: 0,
     temperaturaAgua: 40,
     pecaMinima: "chuveiro",
   };
@@ -544,7 +718,12 @@ export function perdaProjetoEmVazao(trechos: Trecho[], vazaoTroncoLmin: number):
   for (const t of trechos) {
     const ls = vazaoLsNoCenario(t, temTronco, vazaoTroncoLmin / 60, fator);
     const p = perdasHidraulicas(t, ls);
-    total += p.perdaCargaTotal + p.perdaRegistroPressao + p.perdaValvulaMisturadora;
+    total +=
+      p.perdaCargaTotal +
+      p.perdaRegistroPressao +
+      p.perdaValvulaMisturadora +
+      p.perdaMonocomando +
+      p.perdaFiltroY;
   }
   return total;
 }
