@@ -509,16 +509,28 @@ export default function PvcCpvcPressao() {
               <p className="mb-1 mt-3 text-[11px] text-zinc-500">
                 Quantidade de cada peça abastecida no trecho (define a soma dos pesos → vazão).
               </p>
-              <div className="grid grid-cols-1 gap-3">
+              {/* Vídeo do cliente 21/jul: steppers full-width "ocupavam a tela inteira" →
+                  grid compacto em 2 colunas, mesmo padrão das conexões. */}
+              <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                 {PECAS_UTILIZACAO.map((p) => (
-                  <Stepper
-                    key={p.nome}
-                    label={`${p.nome} (peso ${p.peso})`}
-                    value={draft.pecas[p.nome] ?? 0}
-                    onChange={(v) => setPeca(p.nome, v)}
-                    min={0}
-                    max={40}
-                  />
+                  <div key={p.nome} className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={40}
+                      value={draft.pecas[p.nome] ?? 0}
+                      onChange={(e) =>
+                        setPeca(p.nome, Math.min(40, Math.max(0, parseInt(e.target.value, 10) || 0)))
+                      }
+                      onWheel={(e) => e.currentTarget.blur()}
+                      className="w-14 rounded-lg border border-ink-600 bg-ink-800 px-2 py-1.5 text-center text-sm font-semibold text-zinc-100 outline-none focus:border-amber/60"
+                    />
+                    <span className="min-w-0 flex-1 text-[12px] leading-tight text-zinc-400">
+                      {p.nome}
+                      <span className="text-zinc-600"> · peso {p.peso}</span>
+                    </span>
+                  </div>
                 ))}
               </div>
               <div className="mt-2 text-[11px] text-zinc-500">
