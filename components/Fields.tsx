@@ -36,6 +36,10 @@ export function NumberField({
           min={min}
           max={max}
           onChange={(e) => onChange(parseFloat(e.target.value))}
+          // Scroll da página com o campo focado incrementava o valor em silêncio
+          // (comportamento nativo do input number no Chrome). Blur devolve o
+          // scroll pra página e o valor digitado fica intacto.
+          onWheel={(e) => e.currentTarget.blur()}
           className={`w-full bg-transparent font-semibold text-zinc-100 outline-none ${compact ? "px-2 py-2.5 text-sm" : "px-3 py-3 text-base"}`}
         />
         {unit && (

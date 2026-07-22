@@ -545,6 +545,7 @@ export default function PvcCpvcPressao() {
                   min={0}
                   value={draft.conexoes[c.id] ?? 0}
                   onChange={(e) => setConexao(c.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  onWheel={(e) => e.currentTarget.blur()}
                   className="w-14 rounded-lg border border-ink-600 bg-ink-800 px-2 py-1.5 text-center text-sm font-semibold text-zinc-100 outline-none focus:border-amber/60"
                 />
                 <span className="min-w-0 flex-1 text-[12px] leading-tight text-zinc-400">

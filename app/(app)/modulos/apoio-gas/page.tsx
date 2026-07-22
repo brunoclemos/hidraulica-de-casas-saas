@@ -492,6 +492,7 @@ export default function ApoioGas() {
                               return novo;
                             });
                           }}
+                          onWheel={(e) => e.currentTarget.blur()}
                           className={`w-24 rounded-lg border bg-ink-800 px-2 py-1.5 text-right text-[12px] font-semibold outline-none focus:border-amber/60 ${
                             editado ? "border-amber/50 text-amber" : "border-ink-600 text-zinc-100"
                           }`}
