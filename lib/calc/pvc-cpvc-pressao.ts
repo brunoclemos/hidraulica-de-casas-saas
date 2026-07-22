@@ -135,6 +135,10 @@ export interface Trecho {
   // (Feedback 18/jul, vídeo 1: "quero deixar o cara escolher método dos pesos OU vazão manual".)
   modoVazao: "pesos" | "manual";
   vazaoManualLmin: number; // L/min — usada só quando modoVazao === "manual"
+  // Trecho pertence ao TRONCO (linha principal). Nos cenários de vazão, a vazão do
+  // cenário substitui a vazão SÓ dos trechos marcados; os ramais mantêm a de projeto.
+  // (Feedback 21/jul, vídeo: "a vazão máxima entra só no tronco, o resto segue igual".)
+  noTronco: boolean;
   pecas: Record<string, number>; // nome da peça -> quantidade (modo "pesos")
   conexoes: QtdConexoes; // id da conexão -> quantidade
   sobe: number; // m (elevação que sobe)
@@ -454,6 +458,8 @@ export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): 
     // Método dos Pesos e Kv 2,6 (= comportamento anterior, resultado idêntico).
     modoVazao: raw?.modoVazao === "manual" ? "manual" : "pesos",
     vazaoManualLmin: num(raw?.vazaoManualLmin, 0),
+    // sem trecho marcado (projeto antigo) os cenários caem no modo proporcional legado.
+    noTronco: raw?.noTronco === true,
     pecas: raw?.pecas && typeof raw.pecas === "object" ? raw.pecas : {},
     conexoes: raw?.conexoes && typeof raw.conexoes === "object" ? raw.conexoes : {},
     sobe: num(raw?.sobe, 0),
@@ -492,6 +498,7 @@ export function trechoPadrao(material: Material): Trecho {
     comprimentoReal: 3,
     modoVazao: "pesos",
     vazaoManualLmin: 0,
+    noTronco: false,
     pecas: {},
     conexoes: {},
     sobe: 0,
@@ -506,26 +513,36 @@ export function trechoPadrao(material: Material): Trecho {
 }
 
 // ---------------------------------------------------------------------------
-// CURVA DO SISTEMA & CENÁRIOS (vídeos 4 e 5 do cliente 18/jul) — mesma ideia do
-// "Cálculo de Circuladores": escala a vazão de TODOS os trechos proporcionalmente
-// à 1ª inserção (tronco) e soma a perda de carga; a curva vira H = a + b·Q + c·Q².
+// CURVA DO SISTEMA & CENÁRIOS (vídeos 4 e 5 do cliente 18/jul; refinado 21/jul).
+// Com trechos marcados como TRONCO, a vazão do cenário entra ABSOLUTA neles e os
+// demais mantêm a vazão de projeto ("o resto segue igual ao início da planilha").
+// Sem marcação (projeto legado), escala tudo proporcionalmente à 1ª inserção.
 // ---------------------------------------------------------------------------
 
-/** Vazão-base do tronco (1ª inserção) em L/min — referência de escala dos cenários. */
+/** Vazão-base do tronco em L/min: 1º trecho marcado como tronco; sem marcação, a 1ª inserção. */
 export function vazaoTroncoBase(trechos: Trecho[] | undefined | null): number {
-  const t0 = trechos?.[0];
+  const t0 = trechos?.find((t) => t.noTronco) ?? trechos?.[0];
   return t0 ? vazaoDoTrecho(t0).lmin : 0;
 }
 
-/** Perda de carga TOTAL do projeto (mca) para uma vazão de tronco (L/min), escalando
- *  todos os trechos proporcionalmente à vazão-base da 1ª inserção. */
+// Vazão (L/s) de um trecho num cenário — único ponto de decisão tronco × legado,
+// compartilhado pela perda total e pelo detalhamento pra nunca divergirem.
+function vazaoLsNoCenario(t: Trecho, temTronco: boolean, vazaoCenarioLs: number, fator: number): number {
+  if (temTronco) return t.noTronco ? vazaoCenarioLs : vazaoDoTrecho(t).ls;
+  return vazaoDoTrecho(t).ls * fator;
+}
+
+/** Perda de carga TOTAL do projeto (mca) para uma vazão de cenário (L/min).
+ *  Trechos do tronco recebem a vazão do cenário; ramais mantêm a de projeto.
+ *  Sem trecho marcado, escala todos proporcionalmente à base (comportamento legado). */
 export function perdaProjetoEmVazao(trechos: Trecho[], vazaoTroncoLmin: number): number {
+  const temTronco = trechos.some((t) => t.noTronco);
   const base = vazaoTroncoBase(trechos);
-  if (!(base > 0)) return 0;
-  const fator = vazaoTroncoLmin / base;
+  if (!temTronco && !(base > 0)) return 0;
+  const fator = base > 0 ? vazaoTroncoLmin / base : 0;
   let total = 0;
   for (const t of trechos) {
-    const ls = vazaoDoTrecho(t).ls * fator;
+    const ls = vazaoLsNoCenario(t, temTronco, vazaoTroncoLmin / 60, fator);
     const p = perdasHidraulicas(t, ls);
     total += p.perdaCargaTotal + p.perdaRegistroPressao + p.perdaValvulaMisturadora;
   }
@@ -535,7 +552,8 @@ export function perdaProjetoEmVazao(trechos: Trecho[], vazaoTroncoLmin: number):
 export interface DetalheProjetoTrecho {
   ambiente: string;
   nome: string;
-  q: number; // L/min (escalado ao cenário)
+  noTronco: boolean; // pra tabela destacar as linhas do tronco
+  q: number; // L/min (vazão usada no cenário)
   v: number; // m/s
   hf: number; // mca (perda distribuída tubo+conexões, como no Circuladores)
 }
@@ -549,16 +567,25 @@ export function vazaoParaVelocidadeLmin(velAlvo: number, dnInternoMm: number): n
   return ((velAlvo * PI_PLANILHA * Math.pow(dIntM, 2)) / 4) * 1000 * 60;
 }
 
-/** Detalhamento por trecho (Q, V, h_f distribuída) para uma vazão de tronco (L/min). */
+/** Detalhamento por trecho (Q, V, h_f distribuída) para uma vazão de cenário (L/min). */
 export function detalheProjetoEmVazao(
   trechos: TrechoSalvo[],
   vazaoTroncoLmin: number,
 ): DetalheProjetoTrecho[] {
+  const temTronco = (trechos ?? []).some((t) => t.noTronco);
   const base = vazaoTroncoBase(trechos);
+  const fator = base > 0 ? vazaoTroncoLmin / base : 0;
   return (trechos ?? []).map((t) => {
-    const ls = base > 0 ? vazaoDoTrecho(t).ls * (vazaoTroncoLmin / base) : 0;
+    const ls = vazaoLsNoCenario(t, temTronco, vazaoTroncoLmin / 60, fator);
     const p = perdasHidraulicas(t, ls);
-    return { ambiente: t.ambiente, nome: t.nome, q: ls * 60, v: p.velocidade, hf: p.perdaCargaTotal };
+    return {
+      ambiente: t.ambiente,
+      nome: t.nome,
+      noTronco: t.noTronco,
+      q: ls * 60,
+      v: p.velocidade,
+      hf: p.perdaCargaTotal,
+    };
   });
 }
 

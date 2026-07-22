@@ -236,6 +236,8 @@ export default function PvcCpvcPressao() {
     });
 
   const baseTronco = useMemo(() => vazaoTroncoBase(f.trechos), [f.trechos]);
+  // Feedback 21/jul: com trechos marcados, o cenário entra absoluto só neles.
+  const temTronco = useMemo(() => f.trechos.some((t) => t.noTronco), [f.trechos]);
   // cenários válidos: os digitados (>0) ou, se nenhum, múltiplos automáticos do tronco.
   const cenariosValidos = useMemo(() => {
     const manuais = (f.cenarios ?? []).filter((q) => Number.isFinite(q) && q > 0);
@@ -248,11 +250,10 @@ export default function PvcCpvcPressao() {
     [cenariosValidos, f.trechos],
   );
 
-  // velocidade-alvo -> vazão equivalente no tronco (1ª inserção), como no Circuladores.
+  // velocidade-alvo -> vazão equivalente no tronco (1º marcado; sem marcação, 1ª inserção).
   const [velAlvo, setVelAlvo] = useState(2.5);
-  const dnIntTronco = f.trechos[0]
-    ? diametroInterno(f.trechos[0].material, f.trechos[0].diametro)
-    : 0;
+  const trechoRef = f.trechos.find((t) => t.noTronco) ?? f.trechos[0];
+  const dnIntTronco = trechoRef ? diametroInterno(trechoRef.material, trechoRef.diametro) : 0;
   const vazaoEquivVel = vazaoParaVelocidadeLmin(velAlvo, dnIntTronco);
 
   // --- SELEÇÃO DE BOMBA (modelo do cliente, áudio 18/jul): a bomba é escolhida por UM
@@ -624,6 +625,24 @@ export default function PvcCpvcPressao() {
               />
             </div>
           </div>
+          {/* Feedback 21/jul: o cenário de vazão entra só nos trechos do tronco. */}
+          <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-ink-600 bg-ink-800 px-3 py-3">
+            <input
+              type="checkbox"
+              checked={draft.noTronco}
+              onChange={(e) => setDraftPatch({ noTronco: e.target.checked })}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-amber"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-zinc-100">
+                Este trecho faz parte do tronco
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-500">
+                Nos cenários de vazão, a vazão do cenário substitui a vazão deste trecho; os
+                demais mantêm a vazão de projeto.
+              </span>
+            </span>
+          </label>
         </Accordion>
 
         <Accordion title="Detalhes técnicos (auditar)">
@@ -805,6 +824,7 @@ export default function PvcCpvcPressao() {
                             <span className="text-zinc-500">
                               {" "}· {f.material} {p.trecho.diametro}mm
                             </span>
+                            {p.trecho.noTronco && <span className="ml-1 text-amber">· tronco</span>}
                             {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
                           </div>
                           <div className="text-[11px] text-zinc-500">
@@ -851,10 +871,17 @@ export default function PvcCpvcPressao() {
             Cenários & seleção de bomba
           </h3>
           <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
-            Cada cenário recalcula a casa toda e mostra a perda de carga. A vazão do cenário é a do{" "}
-            <span className="text-zinc-400">tronco (1ª inserção)</span>; os demais trechos escalam
-            proporcionalmente.
+            Cada cenário recalcula a casa toda e mostra a perda de carga. A vazão do cenário é
+            aplicada aos trechos marcados como <span className="text-zinc-400">tronco</span>; os
+            demais mantêm a vazão de projeto.
           </p>
+          {!temTronco && (
+            <p className="mb-3 rounded-xl border border-amber/30 bg-amber/5 px-3 py-2 text-[11px] leading-relaxed text-amber">
+              Nenhum trecho marcado como tronco: o cenário escala todos os trechos
+              proporcionalmente. Marque os trechos do tronco na inserção para aplicar a vazão só
+              neles.
+            </p>
+          )}
 
           {/* velocidade-alvo -> vazão equivalente no tronco */}
           <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-amber/25 bg-amber/5 p-3">
@@ -946,8 +973,9 @@ export default function PvcCpvcPressao() {
                   <tbody>
                     {(colunasDetalhe[0]?.linhas ?? []).map((linha0, ti) => (
                       <tr key={ti} className="border-t border-ink-700">
-                        <td className="sticky left-0 bg-ink-800 px-2 py-1 text-left text-zinc-300">
+                        <td className={`sticky left-0 bg-ink-800 px-2 py-1 text-left ${linha0.noTronco ? "font-semibold text-amber" : "text-zinc-300"}`}>
                           {[linha0.ambiente, linha0.nome].filter(Boolean).join(" · ") || `Trecho ${ti + 1}`}
+                          {linha0.noTronco && <span className="font-normal text-amber/70"> · tronco</span>}
                         </td>
                         {colunasDetalhe.map((col, ci) => {
                           const d = col.linhas[ti];
@@ -966,8 +994,9 @@ export default function PvcCpvcPressao() {
                 </table>
               </div>
               <p className="mt-2 text-[11px] text-zinc-500">
-                Q em L/min · V em m/s · h_f em m (perda distribuída no tubo + conexões). Cada cenário
-                escala a vazão de todos os trechos proporcionalmente ao tronco.
+                Q em L/min · V em m/s · h_f em m (perda distribuída no tubo + conexões). A vazão do
+                cenário entra só nos trechos do tronco (em âmbar); os demais mantêm a vazão de
+                projeto.
               </p>
             </Accordion>
           </div>
