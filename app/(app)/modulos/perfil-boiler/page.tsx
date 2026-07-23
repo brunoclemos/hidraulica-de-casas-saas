@@ -27,7 +27,6 @@ interface Form {
   tMistura: number;
   nBanhos: number;
   vazaoDucha: number;
-  coefPerdas: number;
   duracao: number;
   gasKcalh: number;
   gasRendimento: number;
@@ -51,7 +50,6 @@ const PADRAO: Form = {
   tMistura: 41,
   nBanhos: 2,
   vazaoDucha: 12,
-  coefPerdas: 0,
   duracao: 60,
   gasKcalh: 14500,
   gasRendimento: 0.86,
@@ -81,7 +79,7 @@ function normalizarForm(raw: unknown): Form {
     tMistura: num(r.tMistura, PADRAO.tMistura),
     nBanhos: num(r.nBanhos, PADRAO.nBanhos),
     vazaoDucha: num(r.vazaoDucha, PADRAO.vazaoDucha),
-    coefPerdas: num(r.coefPerdas, PADRAO.coefPerdas),
+    // coefPerdas (schema antigo) é descartado — campo removido a pedido do cliente 23/jul
     duracao: num(r.duracao, PADRAO.duracao),
     gasKcalh: num(r.gasKcalh, PADRAO.gasKcalh),
     gasRendimento: num(r.gasRendimento, PADRAO.gasRendimento),
@@ -105,6 +103,11 @@ function toInputs(f: Form): Inputs {
 export default function PerfilBoiler() {
   const [f, setF] = useState<Form>(PADRAO);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  // abertura dos accordions de apoio (UI-only, não persiste): toggle ON abre, OFF
+  // fecha ("fica bem fechado, não mostra nada" — vídeo 3 do cliente); o usuário
+  // ainda pode abrir manualmente um apoio desligado pra pré-configurar
+  const [abertos, setAbertos] = useState({ gas: true, elet: true, bomba: true });
 
   // --- estado de salvamento ("Meus Projetos") ---
   const [projetoId, setProjetoId] = useState<string | null>(null);
@@ -180,6 +183,7 @@ export default function PerfilBoiler() {
   function carregar(p: Projeto) {
     const form = normalizarForm(p.inputs);
     setF(form);
+    setAbertos({ gas: form.gasAtivo, elet: form.eletAtivo, bomba: form.bombaAtivo });
     setProjetoId(p.id);
     setCliente(p.cliente ?? "");
     setNome(p.nome);
@@ -190,6 +194,7 @@ export default function PerfilBoiler() {
 
   function novo() {
     setF(PADRAO);
+    setAbertos({ gas: true, elet: true, bomba: true });
     setProjetoId(null);
     setCliente("");
     setNome("");
@@ -270,6 +275,8 @@ export default function PerfilBoiler() {
         <div className="mt-5 lg:grid lg:grid-cols-[400px,minmax(0,1fr)] lg:items-start lg:gap-6">
           {/* ESQUERDA — inputs */}
           <div className="space-y-4">
+            {/* Card único (vídeo 3 do cliente): TF/TM subiram pra cá no lugar do
+                coef. de perdas, e o card "Temperaturas da água" foi extinto. */}
             <Accordion title="Boiler & banhos" defaultOpen>
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
@@ -291,13 +298,18 @@ export default function PerfilBoiler() {
                   unit="°C"
                 />
                 <NumberField
-                  label="Coef. de perdas"
-                  value={f.coefPerdas}
-                  onChange={(v) => set("coefPerdas", v)}
-                  step={0.01}
-                  min={0}
-                  max={0.9}
-                  hint="Reduz o volume efetivo"
+                  label="Água fria (TF)"
+                  value={f.tFria}
+                  onChange={(v) => set("tFria", v)}
+                  unit="°C"
+                  step={0.1}
+                />
+                <NumberField
+                  label="Mistura (TM)"
+                  value={f.tMistura}
+                  onChange={(v) => set("tMistura", v)}
+                  unit="°C"
+                  hint="Válvula termostática"
                 />
                 <Stepper
                   label="Nº de banhos"
@@ -323,30 +335,21 @@ export default function PerfilBoiler() {
               </div>
             </Accordion>
 
-            <Accordion title="Temperaturas da água" defaultOpen>
-              <div className="grid grid-cols-2 gap-4">
-                <NumberField
-                  label="Água fria (TF)"
-                  value={f.tFria}
-                  onChange={(v) => set("tFria", v)}
-                  unit="°C"
-                  step={0.1}
-                />
-                <NumberField
-                  label="Mistura (TM)"
-                  value={f.tMistura}
-                  onChange={(v) => set("tMistura", v)}
-                  unit="°C"
-                  hint="Válvula termostática"
-                />
-              </div>
-            </Accordion>
-
             <Accordion
               title="Central térmica a gás"
-              defaultOpen
               dimmed={!f.gasAtivo}
-              extra={<Toggle label="Ativar aquecedor a gás" checked={f.gasAtivo} onChange={(v) => set("gasAtivo", v)} />}
+              open={abertos.gas}
+              onOpenChange={(v) => setAbertos((p) => ({ ...p, gas: v }))}
+              extra={
+                <Toggle
+                  label="Ativar aquecedor a gás"
+                  checked={f.gasAtivo}
+                  onChange={(v) => {
+                    set("gasAtivo", v);
+                    setAbertos((p) => ({ ...p, gas: v })); // ON abre, OFF fecha
+                  }}
+                />
+              }
             >
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
@@ -377,9 +380,19 @@ export default function PerfilBoiler() {
 
             <Accordion
               title="Resistência elétrica"
-              defaultOpen
               dimmed={!f.eletAtivo}
-              extra={<Toggle label="Ativar resistência elétrica" checked={f.eletAtivo} onChange={(v) => set("eletAtivo", v)} />}
+              open={abertos.elet}
+              onOpenChange={(v) => setAbertos((p) => ({ ...p, elet: v }))}
+              extra={
+                <Toggle
+                  label="Ativar resistência elétrica"
+                  checked={f.eletAtivo}
+                  onChange={(v) => {
+                    set("eletAtivo", v);
+                    setAbertos((p) => ({ ...p, elet: v }));
+                  }}
+                />
+              }
             >
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
@@ -401,9 +414,19 @@ export default function PerfilBoiler() {
 
             <Accordion
               title="Bomba de calor"
-              defaultOpen
               dimmed={!f.bombaAtivo}
-              extra={<Toggle label="Ativar bomba de calor" checked={f.bombaAtivo} onChange={(v) => set("bombaAtivo", v)} />}
+              open={abertos.bomba}
+              onOpenChange={(v) => setAbertos((p) => ({ ...p, bomba: v }))}
+              extra={
+                <Toggle
+                  label="Ativar bomba de calor"
+                  checked={f.bombaAtivo}
+                  onChange={(v) => {
+                    set("bombaAtivo", v);
+                    setAbertos((p) => ({ ...p, bomba: v }));
+                  }}
+                />
+              }
             >
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
@@ -534,16 +557,16 @@ export default function PerfilBoiler() {
         {/* DETALHES + TABELA MINUTO A MINUTO */}
         <div className="mt-4 space-y-4">
           <Accordion title="Detalhes técnicos (auditar)">
+            {/* linhas de apoio desligado somem ("não fica poluído", vídeo 3) */}
             <div className="grid grid-cols-2 gap-3 text-sm text-zinc-300">
               <Det l="Vazão de mistura (N×Q)" v={`${d.vazaoMistura.toFixed(1)} L/min`} />
-              <Det l="Volume efetivo" v={`${d.volEfetivo.toFixed(0)} L`} />
               <Det l="Consumo por min" v={`${d.consumoPorMin.toFixed(3)} °C/min`} />
-              <Det l="Gás efetivo (kcal/h × rend.)" v={d.gasKcalhEfetiva.toFixed(0)} />
-              <Det l="Ganho gás (ligado)" v={`${d.ganhoGas.toFixed(3)} °C/min`} />
-              <Det l="Ganho resistência (ligada)" v={`${d.ganhoElet.toFixed(3)} °C/min`} />
-              <Det l="Ganho bomba (ligada)" v={`${d.ganhoBomba.toFixed(3)} °C/min`} />
-              <Det l="Pot. ideal gás (mét. vazão)" v={`${d.potIdealGas.toFixed(0)} kcal/h`} />
-              <Det l="Pot. ideal elétrica (mét. vazão)" v={`${d.potIdealElet.toFixed(0)} kcal/h`} />
+              {f.gasAtivo && <Det l="Gás efetivo (kcal/h × rend.)" v={d.gasKcalhEfetiva.toFixed(0)} />}
+              {f.gasAtivo && <Det l="Ganho gás (ligado)" v={`${d.ganhoGas.toFixed(3)} °C/min`} />}
+              {f.eletAtivo && <Det l="Ganho resistência (ligada)" v={`${d.ganhoElet.toFixed(3)} °C/min`} />}
+              {f.bombaAtivo && <Det l="Ganho bomba (ligada)" v={`${d.ganhoBomba.toFixed(3)} °C/min`} />}
+              {f.gasAtivo && <Det l="Pot. ideal gás (mét. vazão)" v={`${d.potIdealGas.toFixed(0)} kcal/h`} />}
+              {f.eletAtivo && <Det l="Pot. ideal elétrica (mét. vazão)" v={`${d.potIdealElet.toFixed(0)} kcal/h`} />}
             </div>
           </Accordion>
 

@@ -5,7 +5,8 @@
 // SÓ GÁS, SÓ RESISTÊNCIA, SÓ BOMBA DE CALOR e TODOS OS APOIOS juntos.
 //
 // Fórmulas-fonte (planilha V3):
-//   consumo     = N*Q*(TM-TF)/vol_efetivo               (…*(D9-D8)/D14)
+//   consumo     = N*Q*(TM-TF)/Volume — coef. de perdas (D13/D14 da planilha)
+//                 removido a pedido do Ferreto (vídeo 23/jul/2026); equivale a D13=0
 //   status_x(t) = ligado(t-1) ? (T(t-1)>=TQ ? 0 : 1)    (desliga só no set point)
 //                             : (T(t-1)<=TQ-Hist_x ? 1 : 0)
 //   T(t) = T(t-1) - consumo + Σ(pot_x ativos)/(60*Volume)   (ganho usa Volume TOTAL)
@@ -23,7 +24,6 @@ export interface Inputs {
   tMistura: number; // TM — válvula termostática (°C)
   nBanhos: number; // N (banhos simultâneos)
   vazaoDucha: number; // Q (L/min por ducha)
-  coefPerdas: number; // 0..1 (reduz volume efetivo)
   duracao: number; // min de simulação
   // CENTRAL TÉRMICA A GÁS
   gasKcalh: number; // potência (kcal/h)
@@ -56,7 +56,6 @@ export interface CurvaCenario {
 
 export interface Derivados {
   vazaoMistura: number; // N*Q (L/min)
-  volEfetivo: number; // Volume*(1-perdas) (L)
   consumoPorMin: number; // °C/min
   gasKW: number; // kcalh/860
   gasKcalhEfetiva: number; // kcalh × rendimento
@@ -93,14 +92,12 @@ export interface Resultado {
 
 export function derivar(i: Inputs): Derivados {
   const vazaoMistura = i.nBanhos * i.vazaoDucha; // D12
-  const volEfetivo = i.volume * (1 - i.coefPerdas); // D14
-  const consumoPorMin = (vazaoMistura * (i.tMistura - i.tFria)) / volEfetivo;
+  const consumoPorMin = (vazaoMistura * (i.tMistura - i.tFria)) / i.volume;
   const gasKcalhEfetiva = i.gasKcalh * i.gasRendimento;
   const eletKcalh = i.eletKW * 860; // I11
   const bombaKcalh = i.bombaBTUh * 0.252; // I17
   return {
     vazaoMistura,
-    volEfetivo,
     consumoPorMin,
     gasKW: i.gasKcalh / 860, // I5
     gasKcalhEfetiva,

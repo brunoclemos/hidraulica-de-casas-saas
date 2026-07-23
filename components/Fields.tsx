@@ -177,16 +177,35 @@ export function Accordion({
   defaultOpen = false,
   extra,
   dimmed = false,
+  open,
+  onOpenChange,
 }: {
   title: string;
   children: ReactNode;
   defaultOpen?: boolean;
   extra?: ReactNode; // controle no header (ex.: Toggle de apoio)
   dimmed?: boolean; // título esmaecido (ex.: apoio desligado)
+  open?: boolean; // modo CONTROLADO: estado React é a única fonte de abertura
+  onOpenChange?: (v: boolean) => void;
 }) {
+  // No modo controlado o clique nativo do <summary> é bloqueado: sem isso o DOM
+  // muda details.open por fora do React e o atributo dessincroniza (o vdom não
+  // re-patcha open={true} -> open={true}).
+  const controlado = open !== undefined;
   return (
-    <details open={defaultOpen} className="group rounded-2xl border border-ink-600 bg-ink-800/60">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-display text-sm font-semibold uppercase tracking-wider">
+    <details
+      open={controlado ? open : defaultOpen}
+      className="group rounded-2xl border border-ink-600 bg-ink-800/60"
+    >
+      <summary
+        onClick={(e) => {
+          if (controlado) {
+            e.preventDefault();
+            onOpenChange?.(!open);
+          }
+        }}
+        className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-display text-sm font-semibold uppercase tracking-wider"
+      >
         <span className={dimmed ? "text-zinc-500" : "text-zinc-200"}>{title}</span>
         <span className="flex items-center gap-3">
           {extra}
