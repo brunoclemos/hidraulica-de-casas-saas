@@ -16,6 +16,8 @@ import {
   BOMBAS,
 } from "@/lib/calc/circuladores";
 import { NumberField, SelectField, Accordion } from "@/components/Fields";
+import { EstrelaFavorita } from "@/components/EstrelaFavorita";
+import { lerFavoritas, alternarFavorita } from "@/lib/favoritas";
 import { QHChart } from "@/components/QHChart";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
 import {
@@ -135,6 +137,15 @@ export default function RecirculacaoConsumo() {
 
   // painéis expansíveis (Conexões / Perdas locais) por trecho — abrem em largura total
   const [paineis, setPaineis] = useState<Set<string>>(() => new Set());
+  // Favoritas sobem pro topo (áudio do cliente 22/jul); mesmo storage do PVC/CPVC.
+  const [favoritas, setFavoritas] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setFavoritas(lerFavoritas());
+  }, []);
+  const conexoesOrdenadas = useMemo(
+    () => [...CONEXOES].sort((a, b) => Number(favoritas.has(b.nome)) - Number(favoritas.has(a.nome))),
+    [favoritas],
+  );
   const togglePainel = (key: string) =>
     setPaineis((s) => {
       const n = new Set(s);
@@ -416,7 +427,7 @@ export default function RecirculacaoConsumo() {
               {paineis.has(`${idx}:conex`) && (
                 <div className="mt-3 rounded-xl border border-amber/30 bg-ink-900/40 p-3">
                   <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-                    {CONEXOES.map((c) => (
+                    {conexoesOrdenadas.map((c) => (
                       <div key={c.nome} className="flex items-center gap-2">
                         <input
                           type="number"
@@ -433,6 +444,10 @@ export default function RecirculacaoConsumo() {
                           {c.nome}
                           <span className="text-zinc-600"> · {num(c.m[t.dnExterno] ?? 0)} m</span>
                         </span>
+                        <EstrelaFavorita
+                          ativa={favoritas.has(c.nome)}
+                          onClick={() => setFavoritas(new Set(alternarFavorita(c.nome)))}
+                        />
                       </div>
                     ))}
                   </div>

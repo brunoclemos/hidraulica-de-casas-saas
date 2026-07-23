@@ -26,6 +26,8 @@ import {
 } from "@/lib/calc/pvc-cpvc-pressao";
 import { curvaBomba } from "@/lib/calc/bombas";
 import { NumberField, SelectField, Stepper, Accordion } from "@/components/Fields";
+import { EstrelaFavorita } from "@/components/EstrelaFavorita";
+import { lerFavoritas, alternarFavorita } from "@/lib/favoritas";
 import { QHChart } from "@/components/QHChart";
 import { PipeFlow } from "@/components/PipeFlow";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
@@ -367,6 +369,19 @@ export default function PvcCpvcPressao() {
 
   const opcoesDiam = diametrosDe(f.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
   const conexoes = conexoesDe(f.material);
+  // Favoritas sobem pro topo (áudio do cliente 22/jul); sort estável preserva a
+  // ordem da planilha entre as demais. Carrega no effect pra não divergir do SSR.
+  const [favoritas, setFavoritas] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setFavoritas(lerFavoritas());
+  }, []);
+  const conexoesOrdenadas = useMemo(
+    () =>
+      [...conexoesDe(f.material)].sort(
+        (a, b) => Number(favoritas.has(b.id)) - Number(favoritas.has(a.id)),
+      ),
+    [f.material, favoritas],
+  );
   const tiposConexoesAtivos = Object.values(draft.conexoes).filter((q) => q > 0).length;
   const isAQ = f.material === "CPVC";
   const editando = editIndex !== null;
@@ -558,9 +573,10 @@ export default function PvcCpvcPressao() {
           <p className="mb-2 text-[11px] leading-relaxed text-zinc-500">
             Tabela completa de conexões {f.material} da planilha do curso ({conexoes.length} tipos).
             O número ao lado de cada peça é o comp. equivalente na bitola {draft.diametro} mm.
+            Toque na estrela pra fixar no topo as que você mais usa.
           </p>
           <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-            {conexoes.map((c) => (
+            {conexoesOrdenadas.map((c) => (
               <div key={c.id} className="flex items-center gap-2">
                 <input
                   type="number"
@@ -575,6 +591,10 @@ export default function PvcCpvcPressao() {
                   {c.nome}
                   <span className="text-zinc-600"> · {(c.valores[draft.diametro] ?? 0).toFixed(2)} m</span>
                 </span>
+                <EstrelaFavorita
+                  ativa={favoritas.has(c.id)}
+                  onClick={() => setFavoritas(new Set(alternarFavorita(c.id)))}
+                />
               </div>
             ))}
           </div>
