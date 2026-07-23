@@ -35,6 +35,10 @@ export interface Inputs {
   // BOMBA DE CALOR
   bombaBTUh: number; // potência (BTU/h)
   histBomba: number; // °C
+  // APOIOS ATIVOS (toggle por apoio, vídeo do cliente 23/jul; desligado sai da simulação)
+  gasAtivo: boolean;
+  eletAtivo: boolean;
+  bombaAtivo: boolean;
   // TEMPO DE AQUECIMENTO SEM CONSUMO
   deltaTAquecimento: number; // ΔT desejado (°C)
 }
@@ -71,20 +75,21 @@ export interface LinhaAquecimento {
   minutos: number; // Vol×ΔT ÷ (pot/60)
 }
 
-export interface Resultado {
-  derivados: Derivados;
-  cenarios: Record<Cenario, CurvaCenario>;
-  aquecimento: LinhaAquecimento[]; // 7 combinações, sem consumo simultâneo
-  validacao: { ok: boolean; mensagem: string | null }; // TF < TM < TQ
+// Cenário pronto pra exibição — a lista é DINÂMICA: só apoios ativos entram,
+// e o combinado só existe com 2+ ativos (com 1 seria idêntico ao "Só X").
+export interface CenarioVisivel {
+  id: Cenario;
+  nome: string; // combinado: "Todos os apoios" (3 ativos) ou "Resistência + gás" etc. (2)
+  cor: string;
+  curva: CurvaCenario;
 }
 
-export const CENARIOS: { id: Cenario; nome: string; cor: string }[] = [
-  { id: "sem", nome: "Sem apoio", cor: "#9ca3af" },
-  { id: "eletrico", nome: "Só resistência", cor: "#f87171" },
-  { id: "gas", nome: "Só aquecedor a gás", cor: "#FABA0D" },
-  { id: "bomba", nome: "Só bomba de calor", cor: "#38bdf8" },
-  { id: "todos", nome: "Todos os apoios", cor: "#4ade80" },
-];
+export interface Resultado {
+  derivados: Derivados;
+  cenarios: CenarioVisivel[]; // "Sem apoio" sempre primeiro; combinado por último
+  aquecimento: LinhaAquecimento[]; // combos dos apoios ativos, sem consumo simultâneo
+  validacao: { ok: boolean; mensagem: string | null }; // TF < TM < TQ
+}
 
 export function derivar(i: Inputs): Derivados {
   const vazaoMistura = i.nBanhos * i.vazaoDucha; // D12
@@ -165,36 +170,83 @@ function simularCombo(i: Inputs, d: Derivados, cenario: Cenario, apoios: Apoio[]
 
 export function calcular(i: Inputs): Resultado {
   const d = derivar(i);
-  const gas: Apoio = { potKcalh: d.gasKcalhEfetiva, hist: i.histGas };
-  const elet: Apoio = { potKcalh: d.eletKcalh, hist: i.histElet };
-  const bomba: Apoio = { potKcalh: d.bombaKcalh, hist: i.histBomba };
+
+  // ordem canônica de exibição: resistência, gás, bomba (mesma do gráfico)
+  const apoios = [
+    {
+      id: "eletrico" as Cenario,
+      nomeSo: "Só resistência",
+      nomeCombo: "Resistência",
+      nomeAq: "Resistência elétrica",
+      cor: "#f87171",
+      ativo: i.eletAtivo,
+      apoio: { potKcalh: d.eletKcalh, hist: i.histElet },
+    },
+    {
+      id: "gas" as Cenario,
+      nomeSo: "Só aquecedor a gás",
+      nomeCombo: "Gás",
+      nomeAq: "Aquecedor a gás",
+      cor: "#FABA0D",
+      ativo: i.gasAtivo,
+      apoio: { potKcalh: d.gasKcalhEfetiva, hist: i.histGas },
+    },
+    {
+      id: "bomba" as Cenario,
+      nomeSo: "Só bomba de calor",
+      nomeCombo: "Bomba",
+      nomeAq: "Bomba de calor",
+      cor: "#38bdf8",
+      ativo: i.bombaAtivo,
+      apoio: { potKcalh: d.bombaKcalh, hist: i.histBomba },
+    },
+  ];
+  const ativos = apoios.filter((a) => a.ativo);
+
+  const cenarios: CenarioVisivel[] = [
+    { id: "sem", nome: "Sem apoio", cor: "#9ca3af", curva: simularCombo(i, d, "sem", []) },
+    ...ativos.map((a) => ({
+      id: a.id,
+      nome: a.nomeSo,
+      cor: a.cor,
+      curva: simularCombo(i, d, a.id, [a.apoio]),
+    })),
+  ];
+  if (ativos.length >= 2) {
+    const nome =
+      ativos.length === 3
+        ? "Todos os apoios"
+        : ativos.map((a, k) => (k === 0 ? a.nomeCombo : a.nomeCombo.toLowerCase())).join(" + ");
+    cenarios.push({
+      id: "todos",
+      nome,
+      cor: "#4ade80",
+      curva: simularCombo(i, d, "todos", ativos.map((a) => a.apoio)),
+    });
+  }
 
   const energia = i.volume * i.deltaTAquecimento; // D29 = Vol × ΔT (kcal)
   const combo = (nome: string, pots: number[]): LinhaAquecimento => {
     const pot = pots.reduce((s, p) => s + p, 0);
     return { nome, potKcalh: pot, minutos: pot > 0 ? energia / (pot / 60) : Infinity };
   };
+  // combos só dos ativos: singles, pares, trio (3 ativos = as 7 linhas de sempre)
+  const aquecimento: LinhaAquecimento[] = ativos.map((a) => combo(a.nomeAq, [a.apoio.potKcalh]));
+  for (let j = 0; j < ativos.length; j++) {
+    for (let k = j + 1; k < ativos.length; k++) {
+      aquecimento.push(
+        combo(`${ativos[j].nomeCombo} + ${ativos[k].nomeCombo.toLowerCase()}`, [
+          ativos[j].apoio.potKcalh,
+          ativos[k].apoio.potKcalh,
+        ]),
+      );
+    }
+  }
+  if (ativos.length === 3) {
+    aquecimento.push(combo("Todos os apoios", ativos.map((a) => a.apoio.potKcalh)));
+  }
 
-  return {
-    derivados: d,
-    cenarios: {
-      sem: simularCombo(i, d, "sem", []),
-      gas: simularCombo(i, d, "gas", [gas]),
-      eletrico: simularCombo(i, d, "eletrico", [elet]),
-      bomba: simularCombo(i, d, "bomba", [bomba]),
-      todos: simularCombo(i, d, "todos", [gas, elet, bomba]),
-    },
-    aquecimento: [
-      combo("Resistência elétrica", [d.eletKcalh]),
-      combo("Aquecedor a gás", [d.gasKcalhEfetiva]),
-      combo("Bomba de calor", [d.bombaKcalh]),
-      combo("Resistência + gás", [d.eletKcalh, d.gasKcalhEfetiva]),
-      combo("Resistência + bomba", [d.eletKcalh, d.bombaKcalh]),
-      combo("Gás + bomba", [d.gasKcalhEfetiva, d.bombaKcalh]),
-      combo("Todos os apoios", [d.eletKcalh, d.gasKcalhEfetiva, d.bombaKcalh]),
-    ],
-    validacao: validar(i),
-  };
+  return { derivados: d, cenarios, aquecimento, validacao: validar(i) };
 }
 
 // "48 min" / "2 h 54 min" amigável para a tabela de aquecimento

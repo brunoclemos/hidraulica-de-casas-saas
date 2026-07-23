@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { calcular, duracaoLabel, minLabel, CENARIOS, Cenario, Inputs } from "@/lib/calc/perfil-boiler";
-import { NumberField, Stepper, Accordion } from "@/components/Fields";
+import { calcular, duracaoLabel, minLabel, Inputs } from "@/lib/calc/perfil-boiler";
+import { NumberField, Stepper, Accordion, Toggle } from "@/components/Fields";
 import { LineChart, Serie, RefLinha } from "@/components/LineChart";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
 import {
@@ -36,6 +36,9 @@ interface Form {
   histElet: number;
   bombaBTUh: number;
   histBomba: number;
+  gasAtivo: boolean;
+  eletAtivo: boolean;
+  bombaAtivo: boolean;
   deltaTAquecimento: number;
 }
 
@@ -57,6 +60,9 @@ const PADRAO: Form = {
   histElet: 5,
   bombaBTUh: 40000,
   histBomba: 5,
+  gasAtivo: true,
+  eletAtivo: true,
+  bombaAtivo: true,
   deltaTAquecimento: 10,
 };
 
@@ -65,6 +71,7 @@ const PADRAO: Form = {
 function normalizarForm(raw: unknown): Form {
   const r = (raw ?? {}) as Partial<Form> & { histerese?: number };
   const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+  const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
   const histLegado = num(r.histerese, PADRAO.histGas);
   return {
     tSetPoint: num(r.tSetPoint, PADRAO.tSetPoint),
@@ -83,6 +90,10 @@ function normalizarForm(raw: unknown): Form {
     histElet: num(r.histElet, histLegado),
     bombaBTUh: num(r.bombaBTUh, PADRAO.bombaBTUh),
     histBomba: num(r.histBomba, histLegado),
+    // projetos salvos antes dos toggles: os 3 apoios ativos (= comportamento anterior)
+    gasAtivo: bool(r.gasAtivo, true),
+    eletAtivo: bool(r.eletAtivo, true),
+    bombaAtivo: bool(r.bombaAtivo, true),
     deltaTAquecimento: num(r.deltaTAquecimento, PADRAO.deltaTAquecimento),
   };
 }
@@ -191,12 +202,12 @@ export default function PerfilBoiler() {
   const r = useMemo(() => calcular(toInputs(f)), [f]);
   const { derivados: d, cenarios, aquecimento, validacao } = r;
 
-  // --- gráfico: 5 séries + referências ---
+  // --- gráfico: séries dos cenários ativos + referências ---
   const chart = useMemo(() => {
-    const series: Serie[] = CENARIOS.map((c) => ({
+    const series: Serie[] = cenarios.map((c) => ({
       nome: c.nome,
       cor: c.cor,
-      pontos: cenarios[c.id].temps,
+      pontos: c.curva.temps,
     }));
     const allY = series.flatMap((s) => s.pontos);
     const lo = Math.min(...allY, f.tMistura);
@@ -208,18 +219,19 @@ export default function PerfilBoiler() {
     const refs: RefLinha[] = [
       { valor: f.tMistura, label: `T. mistura (${f.tMistura.toFixed(0)}°C)`, cor: "#f87171" },
     ];
-    // linha de acionamento por valor DISTINTO de TQ−hist (com hist iguais vira uma só)
+    // linha de acionamento por valor DISTINTO de TQ−hist, só dos apoios ativos
+    const ativos = ([
+      ["gás", f.histGas, f.gasAtivo],
+      ["resist.", f.histElet, f.eletAtivo],
+      ["bomba", f.histBomba, f.bombaAtivo],
+    ] as const).filter(([, , ativo]) => ativo);
     const acionamentos = new Map<number, string[]>();
-    ([
-      ["gás", f.histGas],
-      ["resist.", f.histElet],
-      ["bomba", f.histBomba],
-    ] as const).forEach(([nome, h]) => {
+    ativos.forEach(([nome, h]) => {
       const v = f.tSetPoint - h;
       acionamentos.set(v, [...(acionamentos.get(v) ?? []), nome]);
     });
     acionamentos.forEach((nomes, valor) => {
-      const quem = nomes.length === 3 ? "" : ` ${nomes.join("/")}`;
+      const quem = nomes.length === ativos.length ? "" : ` ${nomes.join("/")}`;
       refs.push({ valor, label: `Acionamento${quem} (${valor.toFixed(0)}°C)`, cor: "#8a8a85" });
     });
     return { series, yMin, yMax, refs };
@@ -330,7 +342,12 @@ export default function PerfilBoiler() {
               </div>
             </Accordion>
 
-            <Accordion title="Central térmica a gás" defaultOpen>
+            <Accordion
+              title="Central térmica a gás"
+              defaultOpen
+              dimmed={!f.gasAtivo}
+              extra={<Toggle label="Ativar aquecedor a gás" checked={f.gasAtivo} onChange={(v) => set("gasAtivo", v)} />}
+            >
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
                   label="Potência"
@@ -358,7 +375,12 @@ export default function PerfilBoiler() {
               </div>
             </Accordion>
 
-            <Accordion title="Resistência elétrica" defaultOpen>
+            <Accordion
+              title="Resistência elétrica"
+              defaultOpen
+              dimmed={!f.eletAtivo}
+              extra={<Toggle label="Ativar resistência elétrica" checked={f.eletAtivo} onChange={(v) => set("eletAtivo", v)} />}
+            >
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
                   label="Potência"
@@ -377,7 +399,12 @@ export default function PerfilBoiler() {
               </div>
             </Accordion>
 
-            <Accordion title="Bomba de calor" defaultOpen>
+            <Accordion
+              title="Bomba de calor"
+              defaultOpen
+              dimmed={!f.bombaAtivo}
+              extra={<Toggle label="Ativar bomba de calor" checked={f.bombaAtivo} onChange={(v) => set("bombaAtivo", v)} />}
+            >
               <div className="grid grid-cols-2 gap-4">
                 <NumberField
                   label="Potência"
@@ -424,8 +451,8 @@ export default function PerfilBoiler() {
                 Tempo até cruzar a T. mistura ({f.tMistura.toFixed(0)} °C)
               </h3>
               <div className="space-y-1.5">
-                {CENARIOS.map((c) => {
-                  const cruza = cenarios[c.id].cruzaEm;
+                {cenarios.map((c) => {
+                  const cruza = c.curva.cruzaEm;
                   return (
                     <div key={c.id} className="flex items-center gap-2 text-sm">
                       <span className="inline-block h-2 w-2 rounded-full" style={{ background: c.cor }} />
@@ -470,28 +497,34 @@ export default function PerfilBoiler() {
               />
             </div>
           </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
-                <th className="pb-2 font-medium">Apoio</th>
-                <th className="pb-2 text-right font-medium">Potência</th>
-                <th className="pb-2 text-right font-medium">Tempo</th>
-              </tr>
-            </thead>
-            <tbody className="text-zinc-200">
-              {aquecimento.map((a) => (
-                <tr key={a.nome} className="border-t border-ink-700">
-                  <td className="py-2 text-zinc-400">{a.nome}</td>
-                  <td className="py-2 text-right tabular-nums">
-                    {a.potKcalh.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kcal/h
-                  </td>
-                  <td className="py-2 text-right font-semibold text-amber">
-                    {f.deltaTAquecimento > 0 ? duracaoLabel(a.minutos) : "—"}
-                  </td>
+          {aquecimento.length === 0 ? (
+            <p className="text-sm text-zinc-500">
+              Ative pelo menos um apoio para calcular o tempo de aquecimento.
+            </p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
+                  <th className="pb-2 font-medium">Apoio</th>
+                  <th className="pb-2 text-right font-medium">Potência</th>
+                  <th className="pb-2 text-right font-medium">Tempo</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="text-zinc-200">
+                {aquecimento.map((a) => (
+                  <tr key={a.nome} className="border-t border-ink-700">
+                    <td className="py-2 text-zinc-400">{a.nome}</td>
+                    <td className="py-2 text-right tabular-nums">
+                      {a.potKcalh.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kcal/h
+                    </td>
+                    <td className="py-2 text-right font-semibold text-amber">
+                      {f.deltaTAquecimento > 0 ? duracaoLabel(a.minutos) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           <p className="mt-2 text-[11px] text-zinc-500">
             Energia necessária: {f.volume.toLocaleString("pt-BR")} L × {f.deltaTAquecimento} °C ={" "}
             {(f.volume * f.deltaTAquecimento).toLocaleString("pt-BR")} kcal.
@@ -520,7 +553,7 @@ export default function PerfilBoiler() {
                 <thead className="sticky top-0 bg-ink-800">
                   <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500">
                     <th className="px-1 py-1.5 font-medium">min</th>
-                    {CENARIOS.map((c) => (
+                    {cenarios.map((c) => (
                       <th key={c.id} className="px-1 py-1.5 text-right font-medium" style={{ color: c.cor }}>
                         {c.nome.replace("Só ", "")}
                       </th>
@@ -528,15 +561,14 @@ export default function PerfilBoiler() {
                   </tr>
                 </thead>
                 <tbody className="text-zinc-300">
-                  {cenarios.sem.temps.map((_, idx) => (
+                  {cenarios[0].curva.temps.map((_, idx) => (
                     <tr key={idx} className="border-t border-ink-700">
                       <td className="px-1 py-1 text-zinc-500">{idx + 1}</td>
-                      {CENARIOS.map((c) => {
-                        const cen = cenarios[c.id];
-                        const ligado = cen.status.some((s) => s[idx]);
+                      {cenarios.map((c) => {
+                        const ligado = c.curva.status.some((s) => s[idx]);
                         return (
                           <td key={c.id} className="px-1 py-1 text-right tabular-nums">
-                            {cen.temps[idx].toFixed(1)}
+                            {c.curva.temps[idx].toFixed(1)}
                             {c.id !== "sem" && (
                               <span
                                 className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${
@@ -555,8 +587,8 @@ export default function PerfilBoiler() {
               </table>
             </div>
             <p className="mt-2 text-[10px] text-zinc-600">
-              Temperaturas em °C. O ponto colorido indica apoio ligado naquele minuto (em “Todos”,
-              aceso se qualquer um dos três estiver ligado).
+              Temperaturas em °C. O ponto colorido indica apoio ligado naquele minuto (no cenário
+              combinado, aceso se qualquer apoio ativo estiver ligado).
             </p>
           </Accordion>
         </div>

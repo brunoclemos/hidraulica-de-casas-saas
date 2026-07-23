@@ -133,20 +133,65 @@ export function Stepper({
   );
 }
 
+// Switch acessível pra usar no header do Accordion (não abre/fecha o details).
+export function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={(e) => {
+        e.preventDefault(); // dentro de <summary>: não abrir/fechar o accordion
+        e.stopPropagation();
+        onChange(!checked);
+      }}
+      className="-my-2 py-2"
+    >
+      <span
+        className={`relative block h-6 w-11 rounded-full border transition-colors ${
+          checked ? "border-amber bg-amber" : "border-ink-600 bg-ink-800"
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full transition-transform ${
+            checked ? "translate-x-5 bg-ink-900" : "bg-zinc-500"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
 export function Accordion({
   title,
   children,
   defaultOpen = false,
+  extra,
+  dimmed = false,
 }: {
   title: string;
   children: ReactNode;
   defaultOpen?: boolean;
+  extra?: ReactNode; // controle no header (ex.: Toggle de apoio)
+  dimmed?: boolean; // título esmaecido (ex.: apoio desligado)
 }) {
   return (
     <details open={defaultOpen} className="group rounded-2xl border border-ink-600 bg-ink-800/60">
-      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 font-display text-sm font-semibold uppercase tracking-wider text-zinc-200">
-        {title}
-        <span className="text-amber transition-transform group-open:rotate-45">+</span>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-display text-sm font-semibold uppercase tracking-wider">
+        <span className={dimmed ? "text-zinc-500" : "text-zinc-200"}>{title}</span>
+        <span className="flex items-center gap-3">
+          {extra}
+          <span className="text-amber transition-transform group-open:rotate-45">+</span>
+        </span>
       </summary>
       <div className="space-y-4 px-4 pb-4">{children}</div>
     </details>
