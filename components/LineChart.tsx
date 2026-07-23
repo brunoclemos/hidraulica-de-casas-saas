@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Gráfico de linha SVG (sem libs) — temperatura × tempo, minuto a minuto.
 // Grade pontilhada nos dois eixos, rótulos de grau no Y, linhas de referência
@@ -49,12 +49,25 @@ export function LineChart({
   zonaLabel?: string;
   unidadeY?: string;
 }) {
-  const W = 640;
-  const H = 340;
-  const ml = 40; // margem esquerda (rótulos do eixo Y)
-  const mr = 14;
+  // Modo COMPACTO no celular (container < 480px): viewBox menor e mais alto —
+  // como o SVG é escalado pra largura do container, texto/linhas ficam
+  // proporcionalmente maiores e legíveis. Desktop segue com o viewBox largo.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [wrapW, setWrapW] = useState<number | null>(null);
+  useEffect(() => {
+    const medir = () => setWrapW(wrapRef.current?.offsetWidth ?? null);
+    medir(); // largura no mount; depois só muda com resize da janela
+    window.addEventListener("resize", medir);
+    return () => window.removeEventListener("resize", medir);
+  }, []);
+  const compact = wrapW !== null && wrapW < 480;
+
+  const W = compact ? 360 : 640;
+  const H = compact ? 300 : 340;
+  const ml = compact ? 34 : 40; // margem esquerda (rótulos do eixo Y)
+  const mr = compact ? 10 : 14;
   const mt = 14;
-  const mb = 40; // margem inferior (eixo X + título)
+  const mb = compact ? 36 : 40; // margem inferior (eixo X + título)
   const pw = W - ml - mr;
   const ph = H - mt - mb;
 
@@ -104,13 +117,14 @@ export function LineChart({
       )
       .join(" ");
 
-  // eixo Y: ticks em passos bonitos (5 °C no caso típico)
-  const yStep = passoBonito(span, 7);
+  // eixo Y: ticks em passos bonitos (5 °C no caso típico; menos divisões no celular)
+  const yStep = passoBonito(span, compact ? 6 : 7);
   const yTicks: number[] = [];
   for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax + 1e-9; v += yStep) yTicks.push(v);
 
-  // eixo X: passo bonito visando ~30 marcações (referência: de 2 em 2 min até 60)
-  const xStep = passoBonito(duracao, 30);
+  // eixo X: desktop ~30 marcações (de 2 em 2 até 60, como a referência);
+  // celular ~6 (de 10 em 10) pra não virar poeira ilegível
+  const xStep = passoBonito(duracao, compact ? 6 : 30);
   const xTicks: number[] = [];
   for (let t = xStep; t <= duracao; t += xStep) xTicks.push(t);
   if (xTicks[xTicks.length - 1] !== duracao) xTicks.push(duracao);
@@ -140,7 +154,7 @@ export function LineChart({
       : null;
 
   return (
-    <div className="w-full">
+    <div ref={wrapRef} className="w-full">
       <div className="relative">
         <svg
           ref={svgRef}

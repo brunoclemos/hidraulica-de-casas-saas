@@ -454,7 +454,7 @@ export default function PerfilBoiler() {
                 <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
                   Decaimento térmico × tempo
                 </span>
-                <span className="text-[10px] text-zinc-500">eixo Y em °C · eixo X em minutos</span>
+                <span className="hidden text-[10px] text-zinc-500 sm:block">eixo Y em °C · eixo X em minutos</span>
               </div>
 
               <LineChart
