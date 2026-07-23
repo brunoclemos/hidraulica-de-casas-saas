@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { calcular, Inputs } from "@/lib/calc/perfil-boiler";
+import { calcular, duracaoLabel, minLabel, CENARIOS, Cenario, Inputs } from "@/lib/calc/perfil-boiler";
 import { NumberField, Stepper, Accordion } from "@/components/Fields";
-import { LineChart, Serie } from "@/components/LineChart";
+import { LineChart, Serie, RefLinha } from "@/components/LineChart";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
 import {
   listarProjetos,
@@ -21,7 +21,6 @@ const MODULO = "perfil-boiler";
 
 interface Form {
   tSetPoint: number;
-  histerese: number;
   volume: number;
   tInicial: number;
   tFria: number;
@@ -32,31 +31,65 @@ interface Form {
   duracao: number;
   gasKcalh: number;
   gasRendimento: number;
+  histGas: number;
   eletKW: number;
+  histElet: number;
+  bombaBTUh: number;
+  histBomba: number;
+  deltaTAquecimento: number;
 }
 
+// Defaults = aba Parâmetros da planilha V3.
 const PADRAO: Form = {
   tSetPoint: 50,
-  histerese: 5,
   volume: 1000,
   tInicial: 50,
   tFria: 19.6,
   tMistura: 41,
   nBanhos: 2,
   vazaoDucha: 12,
-  coefPerdas: 0.1,
+  coefPerdas: 0,
   duracao: 60,
   gasKcalh: 14500,
   gasRendimento: 0.86,
+  histGas: 5,
   eletKW: 4,
+  histElet: 5,
+  bombaBTUh: 40000,
+  histBomba: 5,
+  deltaTAquecimento: 10,
 };
+
+// Projetos salvos no schema antigo (v2, gás × elétrica) tinham `histerese` única
+// e não tinham bomba de calor — herdamos a histerese pros 3 apoios.
+function normalizarForm(raw: unknown): Form {
+  const r = (raw ?? {}) as Partial<Form> & { histerese?: number };
+  const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+  const histLegado = num(r.histerese, PADRAO.histGas);
+  return {
+    tSetPoint: num(r.tSetPoint, PADRAO.tSetPoint),
+    volume: num(r.volume, PADRAO.volume),
+    tInicial: num(r.tInicial, PADRAO.tInicial),
+    tFria: num(r.tFria, PADRAO.tFria),
+    tMistura: num(r.tMistura, PADRAO.tMistura),
+    nBanhos: num(r.nBanhos, PADRAO.nBanhos),
+    vazaoDucha: num(r.vazaoDucha, PADRAO.vazaoDucha),
+    coefPerdas: num(r.coefPerdas, PADRAO.coefPerdas),
+    duracao: num(r.duracao, PADRAO.duracao),
+    gasKcalh: num(r.gasKcalh, PADRAO.gasKcalh),
+    gasRendimento: num(r.gasRendimento, PADRAO.gasRendimento),
+    histGas: num(r.histGas, histLegado),
+    eletKW: num(r.eletKW, PADRAO.eletKW),
+    histElet: num(r.histElet, histLegado),
+    bombaBTUh: num(r.bombaBTUh, PADRAO.bombaBTUh),
+    histBomba: num(r.histBomba, histLegado),
+    deltaTAquecimento: num(r.deltaTAquecimento, PADRAO.deltaTAquecimento),
+  };
+}
 
 function toInputs(f: Form): Inputs {
   return { ...f };
 }
-
-const COR_GAS = "#FABA0D";
-const COR_ELET = "#60a5fa";
 
 export default function PerfilBoiler() {
   const [f, setF] = useState<Form>(PADRAO);
@@ -134,11 +167,12 @@ export default function PerfilBoiler() {
   }
 
   function carregar(p: Projeto) {
-    setF(p.inputs as Form);
+    const form = normalizarForm(p.inputs);
+    setF(form);
     setProjetoId(p.id);
     setCliente(p.cliente ?? "");
     setNome(p.nome);
-    snapshot.current = JSON.stringify(p.inputs);
+    snapshot.current = JSON.stringify(form);
     setSalvoEm(p.atualizadoEm);
     setEstado("salvo");
   }
@@ -155,367 +189,415 @@ export default function PerfilBoiler() {
 
   // --- cálculo ao vivo ---
   const r = useMemo(() => calcular(toInputs(f)), [f]);
-  const { derivados: d, gas, eletrico, validacao } = r;
+  const { derivados: d, cenarios, aquecimento, validacao } = r;
 
-  // --- eixos do gráfico ---
+  // --- gráfico: 5 séries + referências ---
   const chart = useMemo(() => {
-    const allY = [...gas.linhas.map((l) => l.tBoiler), ...eletrico.linhas.map((l) => l.tBoiler)];
-    const lo = Math.min(...allY, d.tAciona, f.tMistura, f.tFria);
-    const hi = Math.max(...allY, d.tAciona, f.tMistura, f.tSetPoint);
-    const pad = Math.max(1, (hi - lo) * 0.08);
-    const series: Serie[] = [
-      { nome: "Apoio a gás", cor: COR_GAS, pontos: gas.linhas.map((l) => l.tBoiler) },
-      { nome: "Apoio elétrico", cor: COR_ELET, pontos: eletrico.linhas.map((l) => l.tBoiler) },
-    ];
-    return { series, yMin: Math.floor(lo - pad), yMax: Math.ceil(hi + pad) };
-  }, [gas, eletrico, d, f]);
+    const series: Serie[] = CENARIOS.map((c) => ({
+      nome: c.nome,
+      cor: c.cor,
+      pontos: cenarios[c.id].temps,
+    }));
+    const allY = series.flatMap((s) => s.pontos);
+    const lo = Math.min(...allY, f.tMistura);
+    const hi = Math.max(...allY, f.tSetPoint);
+    // limites em múltiplos de 5 °C (grade fica igual à da planilha)
+    const yMin = Math.floor((lo - 1) / 5) * 5;
+    const yMax = Math.ceil((hi + 1) / 5) * 5;
 
-  // --- veredito herói (melhor caso = gás, por ter mais potência de apoio) ---
-  const heroi = useMemo(() => {
-    const melhor = gas; // gás é o apoio mais forte; veredito-herói usa o gás
-    if (melhor.confortoMantido) {
-      return { titulo: "Conforto mantido", valor: "Banhos OK", bom: true };
-    }
-    return {
-      titulo: "Água esfria no minuto",
-      valor: `${melhor.minutoBanhoFrio} min`,
-      bom: false,
-    };
-  }, [gas]);
+    const refs: RefLinha[] = [
+      { valor: f.tMistura, label: `T. mistura (${f.tMistura.toFixed(0)}°C)`, cor: "#f87171" },
+    ];
+    // linha de acionamento por valor DISTINTO de TQ−hist (com hist iguais vira uma só)
+    const acionamentos = new Map<number, string[]>();
+    ([
+      ["gás", f.histGas],
+      ["resist.", f.histElet],
+      ["bomba", f.histBomba],
+    ] as const).forEach(([nome, h]) => {
+      const v = f.tSetPoint - h;
+      acionamentos.set(v, [...(acionamentos.get(v) ?? []), nome]);
+    });
+    acionamentos.forEach((nomes, valor) => {
+      const quem = nomes.length === 3 ? "" : ` ${nomes.join("/")}`;
+      refs.push({ valor, label: `Acionamento${quem} (${valor.toFixed(0)}°C)`, cor: "#8a8a85" });
+    });
+    return { series, yMin, yMax, refs };
+  }, [cenarios, f]);
 
   return (
-    <div className="space-y-5">
-      {/* cabeçalho */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <Link href="/dashboard" className="text-xs text-zinc-500 hover:text-zinc-300">
-            ← Ferramentas
-          </Link>
-          <h1 className="mt-1 font-display text-xl font-bold text-zinc-100">
-            Perfil Térmico do Boiler
-          </h1>
-          <p className="text-sm text-zinc-400">
-            Minuto a minuto: o boiler segura os banhos simultâneos? Apoio a gás × elétrico.
-          </p>
-        </div>
-        <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
-      </div>
-
-      {/* aviso de validação física TF < TM < TQ */}
-      {!validacao.ok && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-          {validacao.mensagem}
-        </div>
-      )}
-
-      {/* FORM */}
-      <div className="space-y-4">
-        <Accordion title="Boiler & banhos" defaultOpen>
-          <div className="grid grid-cols-2 gap-4">
-            <NumberField
-              label="Set point (TQ)"
-              value={f.tSetPoint}
-              onChange={(v) => set("tSetPoint", v)}
-              unit="°C"
-            />
-            <NumberField
-              label="Histerese"
-              value={f.histerese}
-              onChange={(v) => set("histerese", v)}
-              unit="°C"
-              hint="Apoio liga quando T ≤ TQ − histerese"
-            />
-            <NumberField
-              label="Volume do boiler"
-              value={f.volume}
-              onChange={(v) => set("volume", v)}
-              unit="L"
-            />
-            <NumberField
-              label="Temp. inicial (Ti)"
-              value={f.tInicial}
-              onChange={(v) => set("tInicial", v)}
-              unit="°C"
-            />
-            <Stepper
-              label="Nº de banhos"
-              value={f.nBanhos}
-              onChange={(v) => set("nBanhos", v)}
-              min={1}
-              max={12}
-            />
-            <NumberField
-              label="Vazão por ducha"
-              value={f.vazaoDucha}
-              onChange={(v) => set("vazaoDucha", v)}
-              unit="L/min"
-            />
-            <NumberField
-              label="Duração da simulação"
-              value={f.duracao}
-              onChange={(v) => set("duracao", v)}
-              unit="min"
-              min={1}
-              max={240}
-            />
-            <NumberField
-              label="Coef. de perdas"
-              value={f.coefPerdas}
-              onChange={(v) => set("coefPerdas", v)}
-              step={0.01}
-              min={0}
-              max={0.9}
-              hint="Reduz o volume efetivo"
-            />
+    <div className="lg:relative lg:left-1/2 lg:w-screen lg:-translate-x-1/2">
+      <div className="lg:mx-auto lg:max-w-6xl lg:px-6">
+        {/* cabeçalho */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <Link href="/dashboard" className="text-xs text-zinc-500 hover:text-zinc-300">
+              ← Ferramentas
+            </Link>
+            <h1 className="mt-1 font-display text-xl font-bold text-zinc-100">
+              Perfil Térmico do Boiler
+            </h1>
+            <p className="text-sm text-zinc-400">
+              Minuto a minuto: o boiler segura os banhos simultâneos? Sem apoio × gás × resistência ×
+              bomba de calor × todos.
+            </p>
           </div>
-        </Accordion>
-
-        <Accordion title="Temperaturas da água" defaultOpen>
-          <div className="grid grid-cols-2 gap-4">
-            <NumberField
-              label="Água fria (TF)"
-              value={f.tFria}
-              onChange={(v) => set("tFria", v)}
-              unit="°C"
-              step={0.1}
-            />
-            <NumberField
-              label="Mistura (TM)"
-              value={f.tMistura}
-              onChange={(v) => set("tMistura", v)}
-              unit="°C"
-              hint="Temp. de conforto da ducha"
-            />
-          </div>
-        </Accordion>
-
-        <Accordion title="Apoio a gás">
-          <div className="grid grid-cols-2 gap-4">
-            <NumberField
-              label="Potência"
-              value={f.gasKcalh}
-              onChange={(v) => set("gasKcalh", v)}
-              unit="kcal/h"
-            />
-            <NumberField
-              label="Rendimento térmico"
-              value={f.gasRendimento}
-              onChange={(v) => set("gasRendimento", v)}
-              step={0.01}
-              min={0}
-              max={1}
-            />
-          </div>
-        </Accordion>
-
-        <Accordion title="Apoio elétrico">
-          <div className="grid grid-cols-2 gap-4">
-            <NumberField
-              label="Potência"
-              value={f.eletKW}
-              onChange={(v) => set("eletKW", v)}
-              unit="kW"
-              hint="Resistência não aplica rendimento"
-            />
-          </div>
-        </Accordion>
-      </div>
-
-      {/* RESULT HERO */}
-      <div className="glass rounded-3xl p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
-            Curva de temperatura · {f.duracao} min
-          </span>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              heroi.bom ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-            }`}
-          >
-            {heroi.bom ? "Conforto OK" : "Banho esfria"}
-          </span>
+          <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
         </div>
 
-        <LineChart
-          series={chart.series}
-          duracao={f.duracao}
-          yMin={chart.yMin}
-          yMax={chart.yMax}
-          refLinha={d.tAciona}
-          refLabel={`Aciona apoio (${d.tAciona.toFixed(0)} °C)`}
-          zonaAbaixoDe={f.tMistura}
-          zonaLabel="zona de banho frio"
-        />
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <Hero titulo={heroi.titulo} valor={heroi.valor} />
-          <Hero titulo="T mínima (gás)" valor={`${gas.tMin.toFixed(1)} °C`} />
-          <Hero titulo="T mínima (elétrico)" valor={`${eletrico.tMin.toFixed(1)} °C`} />
-          <Hero
-            titulo="Aciona apoio em"
-            valor={`${d.tAciona.toFixed(0)} °C`}
-          />
-        </div>
-
-        {gas.algumInsuficiente && (
-          <p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-300">
-            Atenção: a partir do minuto {gas.primeiroInsuficiente} o boiler esfria tanto que não há
-            água fria para misturar — a ducha sai abaixo da temperatura de mistura (água insuficiente).
-          </p>
+        {/* aviso de validação física TF < TM < TQ */}
+        {!validacao.ok && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+            {validacao.mensagem}
+          </div>
         )}
-      </div>
 
-      {/* COMPARADOR Gás × Elétrico */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Apoio a gás × elétrico
-        </h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
-              <th className="pb-2 font-medium">Métrica</th>
-              <th className="pb-2 text-right font-medium text-amber">Gás</th>
-              <th className="pb-2 text-right font-medium" style={{ color: COR_ELET }}>
-                Elétrico
-              </th>
-            </tr>
-          </thead>
-          <tbody className="text-zinc-200">
-            <Row
-              l="Ganho do apoio (°C/min)"
-              a={d.ganhoGas.toFixed(3)}
-              b={d.ganhoElet.toFixed(3)}
-            />
-            <Row l="T mínima (°C)" a={gas.tMin.toFixed(1)} b={eletrico.tMin.toFixed(1)} />
-            <Row
-              l="T mínima no minuto"
-              a={`${gas.tMinMinuto}`}
-              b={`${eletrico.tMinMinuto}`}
-            />
-            <Row
-              l="Banho frio a partir de"
-              a={gas.minutoBanhoFrio ? `${gas.minutoBanhoFrio} min` : "nunca"}
-              b={eletrico.minutoBanhoFrio ? `${eletrico.minutoBanhoFrio} min` : "nunca"}
-            />
-            <Row
-              l="Conforto mantido?"
-              a={gas.confortoMantido ? "sim" : "não"}
-              b={eletrico.confortoMantido ? "sim" : "não"}
-            />
-          </tbody>
-        </table>
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
-          O apoio a gás repõe muito mais calor por minuto, então segura a temperatura do boiler por
-          mais tempo durante banhos simultâneos. A resistência elétrica recupera devagar — o
-          argumento técnico (e de venda) para a central térmica a gás.
-        </p>
-      </div>
+        {/* PREENCHIMENTO DE UM LADO, GRÁFICO DO OUTRO */}
+        <div className="mt-5 lg:grid lg:grid-cols-[400px,minmax(0,1fr)] lg:items-start lg:gap-6">
+          {/* ESQUERDA — inputs */}
+          <div className="space-y-4">
+            <Accordion title="Boiler & banhos" defaultOpen>
+              <div className="grid grid-cols-2 gap-4">
+                <NumberField
+                  label="Set point (TQ)"
+                  value={f.tSetPoint}
+                  onChange={(v) => set("tSetPoint", v)}
+                  unit="°C"
+                />
+                <NumberField
+                  label="Volume do boiler"
+                  value={f.volume}
+                  onChange={(v) => set("volume", v)}
+                  unit="L"
+                />
+                <NumberField
+                  label="Temp. inicial (Ti)"
+                  value={f.tInicial}
+                  onChange={(v) => set("tInicial", v)}
+                  unit="°C"
+                />
+                <NumberField
+                  label="Coef. de perdas"
+                  value={f.coefPerdas}
+                  onChange={(v) => set("coefPerdas", v)}
+                  step={0.01}
+                  min={0}
+                  max={0.9}
+                  hint="Reduz o volume efetivo"
+                />
+                <Stepper
+                  label="Nº de banhos"
+                  value={f.nBanhos}
+                  onChange={(v) => set("nBanhos", v)}
+                  min={1}
+                  max={12}
+                />
+                <NumberField
+                  label="Vazão por ducha"
+                  value={f.vazaoDucha}
+                  onChange={(v) => set("vazaoDucha", v)}
+                  unit="L/min"
+                />
+                <NumberField
+                  label="Duração da simulação"
+                  value={f.duracao}
+                  onChange={(v) => set("duracao", v)}
+                  unit="min"
+                  min={1}
+                  max={240}
+                />
+              </div>
+            </Accordion>
 
-      {/* RESULT: detalhes técnicos + tabela minuto a minuto */}
-      <div className="space-y-4">
-        <Accordion title="Detalhes técnicos (auditar)">
-          <div className="grid grid-cols-2 gap-3 text-sm text-zinc-300">
-            <Det l="Vazão de mistura (N×Q)" v={`${d.vazaoMistura.toFixed(1)} L/min`} />
-            <Det l="Volume efetivo" v={`${d.volEfetivo.toFixed(0)} L`} />
-            <Det l="Aciona apoio (TQ−hist)" v={`${d.tAciona.toFixed(1)} °C`} />
-            <Det l="Consumo por min" v={`${d.consumoPorMin.toFixed(3)} °C/min`} />
-            <Det l="Gás (kW)" v={`${d.gasKW.toFixed(2)} kW`} />
-            <Det l="Elétrico (kcal/h)" v={`${d.eletKcalh.toFixed(0)}`} />
-            <Det l="Ganho gás (apoio on)" v={`${d.ganhoGas.toFixed(3)} °C/min`} />
-            <Det l="Ganho elétrico (apoio on)" v={`${d.ganhoElet.toFixed(3)} °C/min`} />
+            <Accordion title="Temperaturas da água" defaultOpen>
+              <div className="grid grid-cols-2 gap-4">
+                <NumberField
+                  label="Água fria (TF)"
+                  value={f.tFria}
+                  onChange={(v) => set("tFria", v)}
+                  unit="°C"
+                  step={0.1}
+                />
+                <NumberField
+                  label="Mistura (TM)"
+                  value={f.tMistura}
+                  onChange={(v) => set("tMistura", v)}
+                  unit="°C"
+                  hint="Válvula termostática"
+                />
+              </div>
+            </Accordion>
+
+            <Accordion title="Central térmica a gás" defaultOpen>
+              <div className="grid grid-cols-2 gap-4">
+                <NumberField
+                  label="Potência"
+                  value={f.gasKcalh}
+                  onChange={(v) => set("gasKcalh", v)}
+                  unit="kcal/h"
+                  hint={`${d.gasKW.toFixed(1)} kW`}
+                />
+                <NumberField
+                  label="Rendimento térmico"
+                  value={f.gasRendimento}
+                  onChange={(v) => set("gasRendimento", v)}
+                  step={0.01}
+                  min={0}
+                  max={1}
+                  hint="Perda na chaminé"
+                />
+                <NumberField
+                  label="Histerese gás"
+                  value={f.histGas}
+                  onChange={(v) => set("histGas", v)}
+                  unit="°C"
+                  hint={`Liga em T ≤ ${(f.tSetPoint - f.histGas).toFixed(0)} °C`}
+                />
+              </div>
+            </Accordion>
+
+            <Accordion title="Resistência elétrica" defaultOpen>
+              <div className="grid grid-cols-2 gap-4">
+                <NumberField
+                  label="Potência"
+                  value={f.eletKW}
+                  onChange={(v) => set("eletKW", v)}
+                  unit="kW"
+                  hint={`${d.eletKcalh.toFixed(0)} kcal/h · sem rendimento (Joule)`}
+                />
+                <NumberField
+                  label="Histerese elétrica"
+                  value={f.histElet}
+                  onChange={(v) => set("histElet", v)}
+                  unit="°C"
+                  hint={`Liga em T ≤ ${(f.tSetPoint - f.histElet).toFixed(0)} °C`}
+                />
+              </div>
+            </Accordion>
+
+            <Accordion title="Bomba de calor" defaultOpen>
+              <div className="grid grid-cols-2 gap-4">
+                <NumberField
+                  label="Potência"
+                  value={f.bombaBTUh}
+                  onChange={(v) => set("bombaBTUh", v)}
+                  unit="BTU/h"
+                  hint={`${d.bombaKcalh.toFixed(0)} kcal/h (saída térmica)`}
+                />
+                <NumberField
+                  label="Histerese bomba"
+                  value={f.histBomba}
+                  onChange={(v) => set("histBomba", v)}
+                  unit="°C"
+                  hint={`Liga em T ≤ ${(f.tSetPoint - f.histBomba).toFixed(0)} °C`}
+                />
+              </div>
+            </Accordion>
           </div>
-        </Accordion>
 
-        <Accordion title="Tabela minuto a minuto">
-          <div className="max-h-80 overflow-auto">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-ink-800">
-                <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500">
-                  <th className="px-1 py-1.5 font-medium">min</th>
-                  <th className="px-1 py-1.5 text-right font-medium text-amber">T gás</th>
-                  <th className="px-1 py-1.5 text-right font-medium">AQ</th>
-                  <th className="px-1 py-1.5 text-right font-medium">AF</th>
-                  <th className="px-1 py-1.5 text-right font-medium" style={{ color: COR_ELET }}>
-                    T elét
-                  </th>
-                  <th className="px-1 py-1.5 text-right font-medium">AQ</th>
-                  <th className="px-1 py-1.5 text-right font-medium">AF</th>
-                </tr>
-              </thead>
-              <tbody className="text-zinc-300">
-                {gas.linhas.map((lg, idx) => {
-                  const le = eletrico.linhas[idx];
+          {/* DIREITA — gráfico + indicadores (sticky no desktop) */}
+          <div className="mt-5 space-y-4 lg:sticky lg:top-24 lg:mt-0">
+            <div className="glass rounded-3xl p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-display text-xs font-bold uppercase tracking-widest text-amber">
+                  Decaimento térmico × tempo
+                </span>
+                <span className="text-[10px] text-zinc-500">eixo Y em °C · eixo X em minutos</span>
+              </div>
+
+              <LineChart
+                series={chart.series}
+                duracao={f.duracao}
+                yMin={chart.yMin}
+                yMax={chart.yMax}
+                refs={chart.refs}
+                zonaAbaixoDe={f.tMistura}
+                zonaLabel="zona de banho frio"
+              />
+            </div>
+
+            {/* tempo até cruzar TM, por cenário */}
+            <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+              <h3 className="mb-2 font-display text-xs font-bold uppercase tracking-wider text-zinc-200">
+                Tempo até cruzar a T. mistura ({f.tMistura.toFixed(0)} °C)
+              </h3>
+              <div className="space-y-1.5">
+                {CENARIOS.map((c) => {
+                  const cruza = cenarios[c.id].cruzaEm;
                   return (
-                    <tr key={lg.t} className="border-t border-ink-700">
-                      <td className="px-1 py-1 text-zinc-500">{lg.t}</td>
-                      <td className="px-1 py-1 text-right font-semibold text-amber">
-                        {lg.tBoiler.toFixed(1)}
-                      </td>
-                      <td className="px-1 py-1 text-right">{lg.vazaoAQ.toFixed(1)}</td>
-                      <td
-                        className={`px-1 py-1 text-right ${lg.insuficiente ? "text-red-400" : ""}`}
+                    <div key={c.id} className="flex items-center gap-2 text-sm">
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ background: c.cor }} />
+                      <span className="flex-1 text-zinc-400">{c.nome}</span>
+                      <span
+                        className={`font-display font-bold ${
+                          cruza === null ? "text-emerald-400" : "text-zinc-200"
+                        }`}
                       >
-                        {lg.insuficiente ? "0*" : lg.vazaoAF.toFixed(1)}
-                      </td>
-                      <td className="px-1 py-1 text-right font-semibold" style={{ color: COR_ELET }}>
-                        {le.tBoiler.toFixed(1)}
-                      </td>
-                      <td className="px-1 py-1 text-right">{le.vazaoAQ.toFixed(1)}</td>
-                      <td
-                        className={`px-1 py-1 text-right ${le.insuficiente ? "text-red-400" : ""}`}
-                      >
-                        {le.insuficiente ? "0*" : le.vazaoAF.toFixed(1)}
-                      </td>
-                    </tr>
+                        {minLabel(cruza)}
+                      </span>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                Depois desse tempo a válvula termostática não entrega mais a temperatura de mistura —
+                o banho começa a esfriar.
+              </p>
+            </div>
           </div>
-          <p className="mt-2 text-[10px] text-zinc-600">
-            AQ/AF em L/min. * = água fria insuficiente (boiler frio demais para misturar).
-          </p>
-        </Accordion>
-      </div>
+        </div>
 
-      {/* MEUS PROJETOS */}
-      <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
-        <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
-          Meus projetos
-        </h3>
-        {projetos.length === 0 ? (
-          <p className="text-sm text-zinc-500">
-            Nenhum cálculo salvo ainda. Dê um nome e toque em “Salvar projeto”.
+        {/* TEMPO DE AQUECIMENTO SEM CONSUMO */}
+        <div className="mt-5 rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+                Tempo de aquecimento — sem consumo
+              </h3>
+              <p className="text-[11px] text-zinc-500">
+                Quanto tempo cada apoio leva pra subir o boiler em ΔT, parado (sem banho).
+              </p>
+            </div>
+            <div className="w-36">
+              <NumberField
+                label="ΔT desejado"
+                value={f.deltaTAquecimento}
+                onChange={(v) => set("deltaTAquecimento", v)}
+                unit="°C"
+                min={0}
+              />
+            </div>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wider text-zinc-500">
+                <th className="pb-2 font-medium">Apoio</th>
+                <th className="pb-2 text-right font-medium">Potência</th>
+                <th className="pb-2 text-right font-medium">Tempo</th>
+              </tr>
+            </thead>
+            <tbody className="text-zinc-200">
+              {aquecimento.map((a) => (
+                <tr key={a.nome} className="border-t border-ink-700">
+                  <td className="py-2 text-zinc-400">{a.nome}</td>
+                  <td className="py-2 text-right tabular-nums">
+                    {a.potKcalh.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kcal/h
+                  </td>
+                  <td className="py-2 text-right font-semibold text-amber">
+                    {f.deltaTAquecimento > 0 ? duracaoLabel(a.minutos) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[11px] text-zinc-500">
+            Energia necessária: {f.volume.toLocaleString("pt-BR")} L × {f.deltaTAquecimento} °C ={" "}
+            {(f.volume * f.deltaTAquecimento).toLocaleString("pt-BR")} kcal.
           </p>
-        ) : (
-          <ul className="space-y-2">
-            {projetos.map((p) => (
-              <li
-                key={p.id}
-                className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${
-                  p.id === projetoId ? "border-amber/50 bg-amber/5" : "border-ink-600"
-                }`}
-              >
-                <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
-                  <div className="text-[11px] text-zinc-500">
-                    salvo {tempoRelativo(p.atualizadoEm)}
-                  </div>
-                </button>
-                <button
-                  onClick={() => {
-                    excluirProjeto(p.id);
-                    if (p.id === projetoId) novo();
-                    refresh();
-                  }}
-                  className="ml-3 text-xs text-zinc-500 hover:text-red-400"
+        </div>
+
+        {/* DETALHES + TABELA MINUTO A MINUTO */}
+        <div className="mt-4 space-y-4">
+          <Accordion title="Detalhes técnicos (auditar)">
+            <div className="grid grid-cols-2 gap-3 text-sm text-zinc-300">
+              <Det l="Vazão de mistura (N×Q)" v={`${d.vazaoMistura.toFixed(1)} L/min`} />
+              <Det l="Volume efetivo" v={`${d.volEfetivo.toFixed(0)} L`} />
+              <Det l="Consumo por min" v={`${d.consumoPorMin.toFixed(3)} °C/min`} />
+              <Det l="Gás efetivo (kcal/h × rend.)" v={d.gasKcalhEfetiva.toFixed(0)} />
+              <Det l="Ganho gás (ligado)" v={`${d.ganhoGas.toFixed(3)} °C/min`} />
+              <Det l="Ganho resistência (ligada)" v={`${d.ganhoElet.toFixed(3)} °C/min`} />
+              <Det l="Ganho bomba (ligada)" v={`${d.ganhoBomba.toFixed(3)} °C/min`} />
+              <Det l="Pot. ideal gás (mét. vazão)" v={`${d.potIdealGas.toFixed(0)} kcal/h`} />
+              <Det l="Pot. ideal elétrica (mét. vazão)" v={`${d.potIdealElet.toFixed(0)} kcal/h`} />
+            </div>
+          </Accordion>
+
+          <Accordion title="Tabela minuto a minuto">
+            <div className="max-h-96 overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-ink-800">
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500">
+                    <th className="px-1 py-1.5 font-medium">min</th>
+                    {CENARIOS.map((c) => (
+                      <th key={c.id} className="px-1 py-1.5 text-right font-medium" style={{ color: c.cor }}>
+                        {c.nome.replace("Só ", "")}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="text-zinc-300">
+                  {cenarios.sem.temps.map((_, idx) => (
+                    <tr key={idx} className="border-t border-ink-700">
+                      <td className="px-1 py-1 text-zinc-500">{idx + 1}</td>
+                      {CENARIOS.map((c) => {
+                        const cen = cenarios[c.id];
+                        const ligado = cen.status.some((s) => s[idx]);
+                        return (
+                          <td key={c.id} className="px-1 py-1 text-right tabular-nums">
+                            {cen.temps[idx].toFixed(1)}
+                            {c.id !== "sem" && (
+                              <span
+                                className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                                  ligado ? "" : "opacity-15"
+                                }`}
+                                style={{ background: c.cor }}
+                                title={ligado ? "apoio ligado" : "apoio desligado"}
+                              />
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-[10px] text-zinc-600">
+              Temperaturas em °C. O ponto colorido indica apoio ligado naquele minuto (em “Todos”,
+              aceso se qualquer um dos três estiver ligado).
+            </p>
+          </Accordion>
+        </div>
+
+        {/* MEUS PROJETOS */}
+        <div className="mt-4 rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
+          <h3 className="mb-3 font-display text-sm font-bold uppercase tracking-wider text-zinc-200">
+            Meus projetos
+          </h3>
+          {projetos.length === 0 ? (
+            <p className="text-sm text-zinc-500">
+              Nenhum cálculo salvo ainda. Dê um nome e toque em “Salvar projeto”.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {projetos.map((p) => (
+                <li
+                  key={p.id}
+                  className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${
+                    p.id === projetoId ? "border-amber/50 bg-amber/5" : "border-ink-600"
+                  }`}
                 >
-                  excluir
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
+                    <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
+                    <div className="text-[11px] text-zinc-500">
+                      salvo {tempoRelativo(p.atualizadoEm)}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      excluirProjeto(p.id);
+                      if (p.id === projetoId) novo();
+                      refresh();
+                    }}
+                    className="ml-3 text-xs text-zinc-500 hover:text-red-400"
+                  >
+                    excluir
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* BARRA STICKY de salvar */}
@@ -547,25 +629,6 @@ export default function PerfilBoiler() {
         </div>
       </div>
     </div>
-  );
-}
-
-function Hero({ titulo, valor }: { titulo: string; valor: string }) {
-  return (
-    <div className="rounded-2xl bg-ink-900/50 p-3">
-      <div className="text-[11px] uppercase tracking-wider text-zinc-500">{titulo}</div>
-      <div className="mt-0.5 font-display text-2xl font-bold text-amber">{valor}</div>
-    </div>
-  );
-}
-
-function Row({ l, a, b }: { l: string; a: string; b: string }) {
-  return (
-    <tr className="border-t border-ink-700">
-      <td className="py-2 text-zinc-400">{l}</td>
-      <td className="py-2 text-right font-semibold text-amber">{a}</td>
-      <td className="py-2 text-right">{b}</td>
-    </tr>
   );
 }
 
