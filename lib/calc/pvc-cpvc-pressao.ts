@@ -706,6 +706,17 @@ function vazaoLsNoCenario(t: Trecho, temTronco: boolean, vazaoCenarioLs: number,
   return vazaoDoTrecho(t).ls * fator;
 }
 
+/** Termo ESTÁTICO da cadeia de residuais: Σ (desce − sobe + incremento pressurizador).
+ *  Não varia com a vazão, então `residualInicial + ganho − perdaProjetoEmVazao(q)`
+ *  reproduz a residual da última inserção quando q = vazão de projeto do tronco.
+ *  (Report do cliente 22/jul: cenário na vazão do projeto "não batia" com a pressão
+ *  final — a diferença era exatamente entrada + desníveis, que o card não mostrava.) */
+export function ganhoEstaticoProjeto(trechos: Trecho[] | undefined | null): number {
+  let total = 0;
+  for (const t of trechos ?? []) total += t.desce - t.sobe + t.incrementoPressurizador;
+  return total;
+}
+
 /** Perda de carga TOTAL do projeto (mca) para uma vazão de cenário (L/min).
  *  Trechos do tronco recebem a vazão do cenário; ramais mantêm a de projeto.
  *  Sem trecho marcado, escala todos proporcionalmente à base (comportamento legado). */

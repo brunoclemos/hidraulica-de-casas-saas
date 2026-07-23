@@ -13,6 +13,7 @@ import {
   PECAS_UTILIZACAO,
   PRESSAO_MINIMA,
   vazaoTroncoBase,
+  ganhoEstaticoProjeto,
   perdaProjetoEmVazao,
   detalheProjetoEmVazao,
   vazaoParaVelocidadeLmin,
@@ -247,10 +248,16 @@ export default function PvcCpvcPressao() {
     if (manuais.length) return manuais;
     return baseTronco > 0 ? [0.5, 1, 2, 3].map((m) => baseTronco * m) : [];
   }, [f.cenarios, baseTronco]);
-  // v5: perda de carga pura por cenário (cards + detalhamento de comparação).
-  const pontosPerda = useMemo<[number, number][]>(
-    () => cenariosValidos.map((q) => [q, perdaProjetoEmVazao(f.trechos, q)]),
-    [cenariosValidos, f.trechos],
+  // v5: perda de carga por cenário + residual final simulada (report do cliente 22/jul:
+  // na vazão de projeto do tronco ela bate exata com a residual da última inserção).
+  const ganhoEstatico = useMemo(() => ganhoEstaticoProjeto(f.trechos), [f.trechos]);
+  const pontosPerda = useMemo<[number, number, number][]>(
+    () =>
+      cenariosValidos.map((q) => {
+        const perda = perdaProjetoEmVazao(f.trechos, q);
+        return [q, perda, f.residualInicial + ganhoEstatico - perda];
+      }),
+    [cenariosValidos, f.trechos, f.residualInicial, ganhoEstatico],
   );
 
   // velocidade-alvo -> vazão equivalente no tronco (1º marcado; sem marcação, 1ª inserção).
@@ -1034,14 +1041,24 @@ export default function PvcCpvcPressao() {
               Perda de carga por cenário
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {pontosPerda.map(([q, h], i) => (
+              {pontosPerda.map(([q, h, res], i) => (
                 <div key={i} className="rounded-xl bg-ink-700 p-3 text-center">
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400">Cenário {i + 1}</div>
                   <div className="font-display text-base font-bold text-zinc-100">{q.toFixed(1)} L/min</div>
                   <div className="font-display text-lg font-bold text-amber">{h.toFixed(3)} mca</div>
+                  <div className="mt-1 text-[10px] uppercase tracking-wider text-zinc-500">Residual final</div>
+                  <div className={`font-display text-sm font-bold ${res < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                    {res.toFixed(2)} mca
+                  </div>
                 </div>
               ))}
             </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              Perda = perdas hidráulicas do cenário (tubo, conexões, registro, válvula, monocomando
+              e filtro Y). Residual final = pressão de entrada do projeto + desníveis e
+              pressurizadores, menos a perda. Na vazão de projeto do tronco, o residual final é o
+              mesmo da última inserção da lista.
+            </p>
           </div>
 
           {/* detalhamento por trecho e cenário */}
@@ -1102,7 +1119,8 @@ export default function PvcCpvcPressao() {
               <p className="mt-2 text-[11px] text-zinc-500">
                 Q em L/min · V em m/s · h_f em m (perda distribuída no tubo + conexões). A vazão do
                 cenário entra só nos trechos do tronco (em âmbar); os demais mantêm a vazão de
-                projeto.
+                projeto. A coluna h_f mostra só a perda distribuída; a perda do card soma também
+                registro, válvula, monocomando e filtro Y.
               </p>
             </Accordion>
           </div>
