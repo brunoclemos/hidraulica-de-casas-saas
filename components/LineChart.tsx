@@ -64,9 +64,44 @@ export function LineChart({
   const xAt = (idx: number) => ml + (pw * idx) / xN;
   const yAt = (v: number) => mt + ph * (1 - (v - yMin) / span);
 
-  const pathDe = (pts: number[]) =>
+  // Séries com valores IGUAIS num minuto ficariam empilhadas (só a de cima
+  // aparece — ex.: todos os cenários caem juntos até o apoio ligar). Onde os
+  // valores coincidem, abrimos um leque de ±SEP px em paralelo: as linhas
+  // aparecem lado a lado e voltam a se sobrepor à trajetória exata quando
+  // divergem de verdade.
+  const SEP = 2.6;
+  const offsets: number[][] = series.map(() => []);
+  for (let idx = 0; idx < duracao; idx++) {
+    const grupos = new Map<string, number[]>(); // valor -> índices das séries
+    series.forEach((s, k) => {
+      const key = (s.pontos[idx] ?? NaN).toFixed(3);
+      grupos.set(key, [...(grupos.get(key) ?? []), k]);
+    });
+    grupos.forEach((ks) => {
+      ks.forEach((k, pos) => {
+        offsets[k][idx] = ks.length > 1 ? (pos - (ks.length - 1) / 2) * SEP : 0;
+      });
+    });
+  }
+  // suaviza a entrada/saída do leque (média móvel 2×) pra não formar "nó"
+  // no minuto em que as curvas divergem
+  for (let pass = 0; pass < 2; pass++) {
+    offsets.forEach((off) => {
+      const orig = [...off];
+      for (let idx = 0; idx < orig.length; idx++) {
+        const a = orig[idx - 1] ?? orig[idx];
+        const b = orig[idx + 1] ?? orig[idx];
+        off[idx] = (a + orig[idx] + b) / 3;
+      }
+    });
+  }
+
+  const pathDe = (pts: number[], sIdx: number) =>
     pts
-      .map((v, idx) => `${idx === 0 ? "M" : "L"}${xAt(idx).toFixed(1)},${yAt(v).toFixed(1)}`)
+      .map(
+        (v, idx) =>
+          `${idx === 0 ? "M" : "L"}${xAt(idx).toFixed(1)},${(yAt(v) + (offsets[sIdx][idx] ?? 0)).toFixed(1)}`,
+      )
       .join(" ");
 
   // eixo Y: ticks em passos bonitos (5 °C no caso típico)
@@ -158,7 +193,18 @@ export function LineChart({
               return (
                 <g key={`ref${k}`}>
                   <line x1={ml} x2={W - mr} y1={y} y2={y} stroke={r.cor} strokeWidth="1.2" strokeDasharray="6 4" opacity="0.8" />
-                  <text x={W - mr - 2} y={y - 4} textAnchor="end" fontSize="9.5" fill={r.cor}>
+                  {/* halo escuro pra etiqueta não brigar com as curvas por baixo */}
+                  <text
+                    x={W - mr - 2}
+                    y={y - 4}
+                    textAnchor="end"
+                    fontSize="9.5"
+                    fill={r.cor}
+                    stroke="#1B1B19"
+                    strokeWidth="3"
+                    paintOrder="stroke"
+                    strokeLinejoin="round"
+                  >
                     {r.label}
                   </text>
                 </g>
@@ -166,10 +212,10 @@ export function LineChart({
             })}
 
           {/* séries */}
-          {series.map((s) => (
+          {series.map((s, sIdx) => (
             <path
               key={s.nome}
-              d={pathDe(s.pontos)}
+              d={pathDe(s.pontos, sIdx)}
               fill="none"
               stroke={s.cor}
               strokeWidth="2.4"
@@ -182,8 +228,16 @@ export function LineChart({
           {hover && (
             <g>
               <line x1={hover.x} x2={hover.x} y1={mt} y2={mt + ph} stroke="#e4e4e7" strokeWidth="0.8" opacity="0.5" />
-              {hover.valores.map((v) => (
-                <circle key={v.nome} cx={hover.x} cy={yAt(v.v)} r="3.4" fill={v.cor} stroke="#1B1B19" strokeWidth="1.4" />
+              {hover.valores.map((v, k) => (
+                <circle
+                  key={v.nome}
+                  cx={hover.x}
+                  cy={yAt(v.v) + (offsets[k][hover.idx] ?? 0)}
+                  r="3.4"
+                  fill={v.cor}
+                  stroke="#1B1B19"
+                  strokeWidth="1.4"
+                />
               ))}
             </g>
           )}
