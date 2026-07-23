@@ -12,6 +12,8 @@ const ACESSO_INTERNO = new Set<string>([
   "brunoclemos1997@gmail.com",
   "contato@ferretoengenharia.com.br",
   "matheus.henriquecv@gmail.com",
+  "engrafaeljoliveira@gmail.com",
+  "isley.cruz63@gmail.com",
 ]);
 
 export interface Sessao {
