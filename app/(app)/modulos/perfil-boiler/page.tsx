@@ -226,7 +226,9 @@ export default function PerfilBoiler() {
   }, [cenarios, f]);
 
   return (
-    <div className="lg:relative lg:left-1/2 lg:w-screen lg:-translate-x-1/2">
+    // full-bleed por negative margins — NÃO usar transform aqui: transform em
+    // ancestral vira containing block e quebra o position:fixed da barra de salvar
+    <div className="lg:mx-[calc(50%-50vw)]">
       <div className="lg:mx-auto lg:max-w-6xl lg:px-6">
         {/* cabeçalho */}
         <div className="flex items-start justify-between gap-3">
