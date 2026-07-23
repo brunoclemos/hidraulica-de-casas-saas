@@ -111,14 +111,12 @@ export function diametroInterno(material: Material, comercial: number): number {
   return row ? row.interno : NaN;
 }
 
-// Pressão residual MÍNIMA recomendada por peça (mca). ~1 mca = ~10 kPa (chuveiro).
-// (NBR 5626 — referência didática para o semáforo.)
-export const PRESSAO_MINIMA: { id: string; nome: string; mca: number }[] = [
-  { id: "chuveiro", nome: "Chuveiro / ducha", mca: 1.0 },
-  { id: "torneira", nome: "Torneira / lavatório", mca: 0.5 },
-  { id: "valvula_descarga", nome: "Válvula de descarga", mca: 1.5 },
-  { id: "outro", nome: "Outro ponto", mca: 1.0 },
-];
+// Mínimos da NBR 5626 usados quando NÃO há curva de chuveiro no ponto (mca).
+// O caminho crítico é sempre avaliado por chuveiro (nunca torneira) — regra do
+// cliente 23/jul: a curva do chuveiro real JÁ é a exigência completa do ponto,
+// somar o mínimo da norma por cima contaria duas vezes.
+export const MINIMO_CHUVEIRO_NBR = 1.0;
+export const MINIMO_VALVULA_DESCARGA = 1.5;
 
 // ---------------------------------------------------------------------------
 // TIPOS DE ENTRADA / SAÍDA
@@ -155,13 +153,13 @@ export interface Trecho {
   // Filtro Y (feedback 21/jul): perda por Kv da bitola, mesma fórmula da válvula.
   qtdFiltroY: number;
   bitolaFiltroY: string; // chave de FILTRO_Y_KV
-  // Chuveiro no ponto (feedback 21/jul, vídeo 3): id do catálogo CHUVEIROS, "" = nenhum,
-  // "manual" = perda digitada. Soma na EXIGÊNCIA mínima do ponto, não na perda do trecho.
+  // Chuveiro no ponto (feedback 21/jul, vídeo 3; regra 23/jul): define SOZINHO a
+  // exigência mínima do ponto. Id do catálogo CHUVEIROS, "" = nenhum (mínimo NBR
+  // 1,0 mca), "manual" = digitada, "valvula_descarga" = 1,5 mca fixo da NBR.
   chuveiro: string;
   perdaChuveiroManual: number; // mca — usada só quando chuveiro === "manual"
   // temperatura da água (só CPVC, define viscosidade -> Reynolds)
   temperaturaAgua: number; // °C
-  pecaMinima: string; // id de PRESSAO_MINIMA para o semáforo do trecho
 }
 
 export interface ResultadoTrecho {
@@ -182,12 +180,11 @@ export interface ResultadoTrecho {
   perdaMonocomando: number; // mca (feedback 21/jul)
   monocomandoAcima: boolean; // vazão acima do alcance da curva do monocomando
   perdaFiltroY: number; // mca (feedback 21/jul)
-  perdaChuveiro: number; // mca somada na exigência do ponto (feedback 21/jul)
   chuveiroAcima: boolean; // vazão acima do alcance da curva do chuveiro
   desnivel: number; // m (sobe - desce)
   pressaoDisponivel: number; // mca
   pressaoResidual: number; // mca
-  pressaoMinima: number; // mca exigida no ponto (mínimo da peça + chuveiro)
+  pressaoMinima: number; // mca exigida no ponto (curva do chuveiro na vazão, manual ou mínimo NBR)
   residualOk: boolean; // residual >= mínima
   // extras CPVC (Darcy-Weisbach)
   reynolds: number;
@@ -299,15 +296,19 @@ export function perdaPorCurvaVazao(pontos: [number, number][], vazaoLmin: number
   return { perda: pN, acima: false };
 }
 
-/** Exigência extra do chuveiro no ponto (vídeo 3, 21/jul): pressão que o chuveiro
- *  pede na vazão do trecho — curva do fabricante ou perda digitada ("manual"). */
-export function perdaDoChuveiro(t: Trecho, vazaoLmin: number): PerdaCurva {
+/** Exigência mínima do ponto (regra do cliente 23/jul): o chuveiro REAL diz
+ *  sozinho quanto precisa na vazão do trecho — curva do fabricante ou valor
+ *  digitado ("manual"). Sem chuveiro selecionado vale o mínimo NBR do chuveiro
+ *  (1,0 mca); "valvula_descarga" usa o 1,5 mca fixo da NBR (único ponto que
+ *  fica fora da curva). Caminho crítico nunca é avaliado por torneira. */
+export function exigenciaDoPonto(t: Trecho, vazaoLmin: number): PerdaCurva {
+  if (t.chuveiro === "valvula_descarga") return { perda: MINIMO_VALVULA_DESCARGA, acima: false };
   if (t.chuveiro === "manual") {
     const v = Number.isFinite(t.perdaChuveiroManual) && t.perdaChuveiroManual > 0 ? t.perdaChuveiroManual : 0;
-    return { perda: v, acima: false };
+    return { perda: v > 0 ? v : MINIMO_CHUVEIRO_NBR, acima: false };
   }
   const c = CHUVEIROS.find((x) => x.id === t.chuveiro);
-  if (!c) return { perda: 0, acima: false };
+  if (!c) return { perda: MINIMO_CHUVEIRO_NBR, acima: false };
   return perdaPorCurvaVazao(c.pontos, vazaoLmin);
 }
 
@@ -557,11 +558,10 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
     p.perdaMonocomando -
     p.perdaFiltroY;
 
-  // Exigência do ponto (feedback 21/jul): mínimo da peça + pressão que o chuveiro
-  // pede na vazão (ex.: chuveiro 1 mca + curva 12 mca = 13 mca exigidos).
-  const pminPeca = PRESSAO_MINIMA.find((x) => x.id === t.pecaMinima)?.mca ?? 1;
-  const chuveiroCalc = perdaDoChuveiro(t, vazaoLmin);
-  const pmin = pminPeca + chuveiroCalc.perda;
+  // Exigência do ponto (regra do cliente 23/jul): SÓ o que o chuveiro/válvula
+  // selecionado pede — somar o mínimo da NBR por cima contaria duas vezes.
+  const chuveiroCalc = exigenciaDoPonto(t, vazaoLmin);
+  const pmin = chuveiroCalc.perda;
   const residualOk = pressaoResidual >= pmin;
 
   return {
@@ -582,7 +582,6 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
     perdaMonocomando: p.perdaMonocomando,
     monocomandoAcima: p.monocomandoAcima,
     perdaFiltroY: p.perdaFiltroY,
-    perdaChuveiro: chuveiroCalc.perda,
     chuveiroAcima: chuveiroCalc.acima,
     desnivel,
     pressaoDisponivel,
@@ -638,7 +637,8 @@ export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): 
     chuveiro: typeof raw?.chuveiro === "string" ? raw.chuveiro : "",
     perdaChuveiroManual: num(raw?.perdaChuveiroManual, 0),
     temperaturaAgua: num(raw?.temperaturaAgua, base.temperaturaAgua),
-    pecaMinima: typeof raw?.pecaMinima === "string" ? raw.pecaMinima : base.pecaMinima,
+    // pecaMinima (schema antigo) é simplesmente descartada: a exigência agora
+    // vem só do chuveiro selecionado (regra do cliente 23/jul).
     // campo novo: projetos antigos guardavam tudo em `nome` -> herdamos como ambiente vazio.
     ambiente: typeof raw?.ambiente === "string" ? raw.ambiente : "",
     nome: typeof raw?.nome === "string" ? raw.nome : "",
@@ -682,7 +682,6 @@ export function trechoPadrao(material: Material): Trecho {
     chuveiro: "",
     perdaChuveiroManual: 0,
     temperaturaAgua: 40,
-    pecaMinima: "chuveiro",
   };
 }
 

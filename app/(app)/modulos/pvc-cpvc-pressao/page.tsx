@@ -11,7 +11,8 @@ import {
   diametroInterno,
   conexoesDe,
   PECAS_UTILIZACAO,
-  PRESSAO_MINIMA,
+  MINIMO_CHUVEIRO_NBR,
+  MINIMO_VALVULA_DESCARGA,
   vazaoTroncoBase,
   ganhoEstaticoProjeto,
   perdaProjetoEmVazao,
@@ -68,7 +69,6 @@ function freshDraft(material: Material, count: number, base?: TrechoSalvo): Trec
     // mantém escolhas comuns entre inserções para agilizar (engenheiro repete bitola/peça)
     diametro: base?.diametro ?? d.diametro,
     temperaturaAgua: base?.temperaturaAgua ?? d.temperaturaAgua,
-    pecaMinima: base?.pecaMinima ?? d.pecaMinima,
   };
 }
 
@@ -656,32 +656,29 @@ export default function PvcCpvcPressao() {
                 hint="Kv preliminar lido do gráfico do fabricante."
               />
             )}
+            {/* Regra do cliente 23/jul: o chuveiro real define SOZINHO a exigência do
+                ponto (somar o mínimo NBR por cima contaria duas vezes). Válvula de
+                descarga entra aqui mesmo, com o 1,5 mca fixo da NBR. */}
             <SelectField
-              label="Peça crítica (mínimo)"
-              value={draft.pecaMinima}
-              onChange={(v) => setDraftPatch({ pecaMinima: String(v) })}
-              options={PRESSAO_MINIMA.map((p) => ({ value: p.id, label: `${p.nome} (${p.mca} mca)` }))}
-            />
-            {/* Feedback 21/jul (vídeo 3): a curva do chuveiro entra na exigência do ponto. */}
-            <SelectField
-              label="Chuveiro no ponto (curva)"
+              label="Chuveiro no ponto (exigência)"
               value={draft.chuveiro}
               onChange={(v) => setDraftPatch({ chuveiro: String(v) })}
               options={[
-                { value: "", label: "Nenhum" },
-                { value: "manual", label: "Manual (digitar a perda)" },
+                { value: "", label: `Nenhum (mínimo NBR ${MINIMO_CHUVEIRO_NBR.toFixed(1).replace(".", ",")} mca)` },
+                { value: "manual", label: "Manual (digitar a exigência)" },
+                { value: "valvula_descarga", label: `Válvula de descarga (${MINIMO_VALVULA_DESCARGA.toFixed(1).replace(".", ",")} mca)` },
                 ...CHUVEIROS.map((c) => ({ value: c.id, label: c.nome })),
               ]}
-              hint="Curvas Docol/Deca do PDF do cliente; Manual cobre outros modelos."
+              hint="A curva do chuveiro na vazão do trecho É a exigência do ponto. Manual cobre outros modelos."
             />
             {draft.chuveiro === "manual" && (
               <NumberField
-                label="Perda do chuveiro"
+                label="Exigência do chuveiro"
                 value={draft.perdaChuveiroManual}
                 onChange={(v) => setDraftPatch({ perdaChuveiroManual: v })}
                 unit="mca"
                 step={0.5}
-                hint="Perda de carga do chuveiro na vazão de projeto (da curva do fabricante)."
+                hint="Pressão que o chuveiro pede na vazão de projeto (da curva do fabricante)."
               />
             )}
           </div>
@@ -708,8 +705,7 @@ export default function PvcCpvcPressao() {
               )}
               {draft.chuveiro && (
                 <div>
-                  Exigência no ponto: mínimo {(r.pressaoMinima - r.perdaChuveiro).toFixed(1)} +
-                  chuveiro {r.perdaChuveiro.toFixed(2)} ={" "}
+                  Exigência no ponto em {r.vazaoLmin.toFixed(1)} L/min:{" "}
                   <span className="font-semibold text-amber">{r.pressaoMinima.toFixed(2)} mca</span>
                   {r.chuveiroAcima && (
                     <span className="block text-amber">
@@ -795,7 +791,7 @@ export default function PvcCpvcPressao() {
             )}
             {draft.qtdFiltroY > 0 && <Det l="Perda filtro Y" v={`${r.perdaFiltroY.toFixed(4)} mca`} />}
             {draft.chuveiro !== "" && (
-              <Det l="Exigência chuveiro" v={`${r.perdaChuveiro.toFixed(2)} mca`} />
+              <Det l="Exigência no ponto" v={`${r.pressaoMinima.toFixed(2)} mca`} />
             )}
             <Det l="Desnível" v={`${r.desnivel.toFixed(2)} m`} />
             <Det l="Pressão disponível" v={`${r.pressaoDisponivel.toFixed(2)} mca`} />
@@ -839,7 +835,7 @@ export default function PvcCpvcPressao() {
             {r.pressaoResidual.toFixed(2)} <span className="text-xl">mca</span>
           </div>
           <div className="mt-1 text-[11px] text-zinc-500">
-            mínimo p/ {PRESSAO_MINIMA.find((p) => p.id === draft.pecaMinima)?.nome}: {r.pressaoMinima.toFixed(2)} mca
+            exigência no ponto: {r.pressaoMinima.toFixed(2)} mca
             {" · "}
             {(r.pressaoResidual * 9.80665).toFixed(0)} kPa
           </div>
@@ -992,8 +988,8 @@ export default function PvcCpvcPressao() {
           A pressão residual de cada inserção vira a entrada da próxima automaticamente. A
           numeração (#) é a <span className="text-zinc-400">ordem de inserção</span> — é ela que
           define a sequência hidráulica, mesmo que os trechos estejam agrupados por ambiente.
-          Verde = atende o mínimo da peça; vermelho = insuficiente ou negativa. Toque numa
-          inserção para editar.
+          Verde = atende a exigência do ponto (chuveiro selecionado); vermelho = insuficiente
+          ou negativa. Toque numa inserção para editar.
         </p>
       </div>
 
