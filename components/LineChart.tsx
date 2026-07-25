@@ -151,7 +151,7 @@ export function LineChart({
   const W = compact ? 360 : 640;
   const H = compact ? 300 : 340;
   const ml = compact ? 34 : 40; // margem esquerda (rótulos do eixo Y)
-  const mr = compact ? 10 : 14;
+  const mr = compact ? 32 : 46; // margem direita (valor final de cada curva)
   const mt = 14;
   const mb = compact ? 36 : 40; // margem inferior (eixo X + título)
   const pw = W - ml - mr;
@@ -168,7 +168,7 @@ export function LineChart({
   // valores coincidem, abrimos um leque de ±SEP px em paralelo: as linhas
   // aparecem lado a lado e voltam a se sobrepor à trajetória exata quando
   // divergem de verdade.
-  const SEP = 2.6;
+  const SEP = 2;
   // A ordem DENTRO do leque é a ordem em que as séries vão divergir, não a ordem
   // do array: quem vai ficar por cima já entra por cima. Ordenando pela ordem do
   // array, as linhas se cruzavam todas no minuto em que o leque fecha e aquilo
@@ -229,6 +229,26 @@ export function LineChart({
   if (xTicks[xTicks.length - 1] !== duracao) xTicks.push(duracao);
 
   const zonaY = zonaAbaixoDe !== undefined ? yAt(Math.max(yMin, Math.min(yMax, zonaAbaixoDe))) : null;
+  const refsVisiveis = refs.filter((r) => r.valor >= yMin && r.valor <= yMax);
+
+  // Valor final de cada curva impresso na ponta, na margem direita. Quando duas
+  // terminam coladas os rótulos se empurram verticalmente pra não empilhar.
+  const ALTURA_ROTULO = compact ? 10 : 11.5;
+  const rotulosFinais = series
+    .map((s, k) => ({
+      cor: s.cor,
+      v: s.pontos[s.pontos.length - 1],
+      y: linhas[k][linhas[k].length - 1]?.y ?? 0,
+    }))
+    .sort((a, b) => a.y - b.y);
+  for (let k = 1; k < rotulosFinais.length; k++) {
+    const minimo = rotulosFinais[k - 1].y + ALTURA_ROTULO;
+    if (rotulosFinais[k].y < minimo) rotulosFinais[k].y = minimo;
+  }
+  const fundo = mt + ph;
+  for (let k = rotulosFinais.length - 1; k >= 0; k--) {
+    if (rotulosFinais[k].y > fundo) rotulosFinais[k].y = fundo - (rotulosFinais.length - 1 - k) * ALTURA_ROTULO;
+  }
 
   // ----- crosshair -----
   const svgRef = useRef<SVGSVGElement>(null);
@@ -264,9 +284,35 @@ export function LineChart({
           onPointerMove={onMove}
           onPointerLeave={() => setHoverIdx(null)}
         >
+          <defs>
+            {/* brilho da própria cor por trás da linha: dá profundidade no escuro */}
+            <filter id="hdc-brilho" x="-10%" y="-25%" width="120%" height="150%">
+              <feGaussianBlur stdDeviation="3" result="borrado" />
+              <feComponentTransfer in="borrado" result="suave">
+                <feFuncA type="linear" slope="0.55" />
+              </feComponentTransfer>
+              <feMerge>
+                <feMergeNode in="suave" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            {/* faixa que marca a fronteira do banho frio e some pra baixo: véu
+                chapado na zona inteira afogava a metade de baixo do gráfico */}
+            <linearGradient id="hdc-zona-fria" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.14" />
+              <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
           {/* zona de banho frio */}
           {zonaY !== null && (
-            <rect x={ml} y={zonaY} width={pw} height={Math.max(0, mt + ph - zonaY)} fill="#ef4444" opacity="0.035" />
+            <rect
+              x={ml}
+              y={zonaY}
+              width={pw}
+              height={Math.max(0, Math.min(mt + ph - zonaY, 56))}
+              fill="url(#hdc-zona-fria)"
+            />
           )}
 
           {/* grade + rótulos Y */}
@@ -298,43 +344,68 @@ export function LineChart({
             Tempo (min)
           </text>
 
-          {/* linhas de referência tracejadas com etiqueta (estilo da planilha) */}
-          {refs
-            .filter((r) => r.valor >= yMin && r.valor <= yMax)
-            .map((r, k) => {
-              const y = yAt(r.valor);
-              return (
-                <g key={`ref${k}`}>
-                  <line x1={ml} x2={W - mr} y1={y} y2={y} stroke={r.cor} strokeWidth="1.2" strokeDasharray="6 4" opacity="0.8" />
-                  {/* halo escuro pra etiqueta não brigar com as curvas por baixo */}
-                  <text
-                    x={W - mr - 2}
-                    y={y - 4}
-                    textAnchor="end"
-                    fontSize="9.5"
-                    fill={r.cor}
-                    stroke="#1B1B19"
-                    strokeWidth="3"
-                    paintOrder="stroke"
-                    strokeLinejoin="round"
-                  >
-                    {r.label}
-                  </text>
-                </g>
-              );
-            })}
+          {/* linhas de referência tracejadas (as etiquetas vão depois das curvas) */}
+          {refsVisiveis.map((r, k) => (
+            <line
+              key={`ref${k}`}
+              x1={ml}
+              x2={W - mr}
+              y1={yAt(r.valor)}
+              y2={yAt(r.valor)}
+              stroke={r.cor}
+              strokeWidth="1.2"
+              strokeDasharray="6 4"
+              opacity="0.8"
+            />
+          ))}
 
           {/* séries */}
-          {series.map((s, sIdx) => (
-            <path
-              key={s.nome}
-              d={pathSuave(linhas[sIdx])}
-              fill="none"
-              stroke={s.cor}
-              strokeWidth="2.4"
+          <g filter="url(#hdc-brilho)">
+            {series.map((s, sIdx) => (
+              <path
+                key={s.nome}
+                d={pathSuave(linhas[sIdx])}
+                fill="none"
+                stroke={s.cor}
+                strokeWidth="2.4"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            ))}
+          </g>
+
+          {/* etiquetas das referências POR CIMA das curvas, em pastilha opaca:
+              à direita brigavam com o valor final, e só o halo do texto não
+              vencia uma linha de 2,4 px com brilho passando por baixo */}
+          {refsVisiveis.map((r, k) => {
+            const y = yAt(r.valor);
+            return (
+              <g key={`refLabel${k}`}>
+                <rect x={ml + 4} y={y - 14.5} width={r.label.length * 5.1 + 10} height="13.5" rx="4" fill="#1B1B19" opacity="0.94" />
+                <text x={ml + 9} y={y - 5} textAnchor="start" fontSize="9.5" fill={r.cor}>
+                  {r.label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* valor final na ponta de cada curva */}
+          {rotulosFinais.map((r) => (
+            <text
+              key={`${r.cor}${r.v}`}
+              x={W - mr + 5}
+              y={r.y + 3.5}
+              textAnchor="start"
+              fontSize={compact ? "9.5" : "10.5"}
+              fontWeight="600"
+              fill={r.cor}
+              stroke="#1B1B19"
+              strokeWidth="3"
+              paintOrder="stroke"
               strokeLinejoin="round"
-              strokeLinecap="round"
-            />
+            >
+              {r.v.toFixed(0)}°
+            </text>
           ))}
 
           {/* crosshair */}
