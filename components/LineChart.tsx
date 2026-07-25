@@ -36,10 +36,12 @@ function passoBonito(span: number, maxTicks: number): number {
 // Em trecho de inclinação constante a média devolve o mesmo valor — reta segue
 // reta, e é o certo: com a válvula termostática segurando a T. mistura o boiler
 // esfria a °C/min constante. O que muda de verdade é a quebra onde um apoio liga,
-// que deixa de ser bico. O traço sai no máx ~0,3 °C do valor calculado, e SÓ ali;
+// que deixa de ser bico. O traço sai no máx ~0,7 °C do valor calculado, e SÓ ali;
 // tooltip e tabela minuto a minuto seguem exatos, e o marcador do crosshair é
 // desenhado sobre esta curva pra não ficar solto no ar.
-const JANELA = 2;
+// JANELA é o botão de "curvar mais": subir arredonda mais e afasta mais o traço
+// do dado calculado. Começou em 2, subiu pra 4 a pedido do cliente (25/jul).
+const JANELA = 4;
 function arredondar(ys: number[]): number[] {
   return ys.map((_, i) => {
     const jan = Math.min(JANELA, i, ys.length - 1 - i);
