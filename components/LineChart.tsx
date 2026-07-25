@@ -163,56 +163,14 @@ export function LineChart({
   const xAt = (idx: number) => ml + (pw * idx) / xN;
   const yAt = (v: number) => mt + ph * (1 - (v - yMin) / span);
 
-  // Séries com valores IGUAIS num minuto ficariam empilhadas (só a de cima
-  // aparece — ex.: todos os cenários caem juntos até o apoio ligar). Onde os
-  // valores coincidem, abrimos um leque de ±SEP px em paralelo: as linhas
-  // aparecem lado a lado e voltam a se sobrepor à trajetória exata quando
-  // divergem de verdade.
-  const SEP = 2;
-  // A ordem DENTRO do leque é a ordem em que as séries vão divergir, não a ordem
-  // do array: quem vai ficar por cima já entra por cima. Ordenando pela ordem do
-  // array, as linhas se cruzavam todas no minuto em que o leque fecha e aquilo
-  // virava um nó no meio do gráfico.
-  const ordemDoLeque = (ks: number[], idx: number): number[] => {
-    for (let j = idx + 1; j < duracao; j++) {
-      const vals = ks.map((k) => (series[k].pontos[j] ?? NaN).toFixed(3));
-      if (new Set(vals).size > 1) {
-        return [...ks].sort((a, b) => (series[b].pontos[j] ?? 0) - (series[a].pontos[j] ?? 0));
-      }
-    }
-    return ks; // nunca divergem: qualquer ordem serve
-  };
-  const offsets: number[][] = series.map(() => []);
-  for (let idx = 0; idx < duracao; idx++) {
-    const grupos = new Map<string, number[]>(); // valor -> índices das séries
-    series.forEach((s, k) => {
-      const key = (s.pontos[idx] ?? NaN).toFixed(3);
-      grupos.set(key, [...(grupos.get(key) ?? []), k]);
-    });
-    grupos.forEach((ks) => {
-      ordemDoLeque(ks, idx).forEach((k, pos) => {
-        offsets[k][idx] = ks.length > 1 ? (pos - (ks.length - 1) / 2) * SEP : 0;
-      });
-    });
-  }
-  // suaviza a entrada/saída do leque (média móvel 2×) pra não formar "nó"
-  // no minuto em que as curvas divergem
-  for (let pass = 0; pass < 2; pass++) {
-    offsets.forEach((off) => {
-      const orig = [...off];
-      for (let idx = 0; idx < orig.length; idx++) {
-        const a = orig[idx - 1] ?? orig[idx];
-        const b = orig[idx + 1] ?? orig[idx];
-        off[idx] = (a + orig[idx] + b) / 3;
-      }
-    });
-  }
-
-  // Pontos de tela de cada série, com o offset do leque somado e o cotovelo
-  // arredondado. É esta linha que vira o path E que o crosshair usa pra posicionar
-  // o marcador, então os dois nunca se descolam.
-  const linhas = series.map((s, sIdx) => {
-    const ys = arredondar(s.pontos.map((v, idx) => yAt(v) + (offsets[sIdx][idx] ?? 0)));
+  // Séries com o mesmo valor num minuto (todos os cenários caem juntos até o
+  // primeiro apoio ligar) simplesmente se sobrepõem, como na referência do
+  // cliente: o trecho comum é UMA linha e as curvas se abrem onde divergem de
+  // verdade. Já teve um leque que separava as coincidentes em paralelo por
+  // alguns pixels — virava um borrão de fitas coladas e o cliente reprovou.
+  // Quem quiser o valor de cada cenário no trecho comum tem o crosshair.
+  const linhas = series.map((s) => {
+    const ys = arredondar(s.pontos.map((v) => yAt(v)));
     return ys.map((y, idx) => ({ x: xAt(idx), y }));
   });
 
@@ -285,11 +243,13 @@ export function LineChart({
           onPointerLeave={() => setHoverIdx(null)}
         >
           <defs>
-            {/* brilho da própria cor por trás da linha: dá profundidade no escuro */}
+            {/* brilho discreto da própria cor por trás da linha. Discreto de
+                propósito: forte, ele borrava as curvas umas nas outras onde elas
+                correm próximas */}
             <filter id="hdc-brilho" x="-10%" y="-25%" width="120%" height="150%">
-              <feGaussianBlur stdDeviation="3" result="borrado" />
+              <feGaussianBlur stdDeviation="1.6" result="borrado" />
               <feComponentTransfer in="borrado" result="suave">
-                <feFuncA type="linear" slope="0.55" />
+                <feFuncA type="linear" slope="0.3" />
               </feComponentTransfer>
               <feMerge>
                 <feMergeNode in="suave" />
@@ -360,14 +320,18 @@ export function LineChart({
           ))}
 
           {/* séries */}
+          {/* ordem invertida: a 1ª série (cenário de referência, cinza) fica por
+              CIMA. No trecho em que todos os cenários coincidem quem estivesse
+              por cima daria a cor ao tronco, e um tronco verde parecia "todos os
+              apoios" quando na verdade são as 5 curvas juntas */}
           <g filter="url(#hdc-brilho)">
-            {series.map((s, sIdx) => (
+            {series.map((s, sIdx) => ({ s, sIdx })).reverse().map(({ s, sIdx }) => (
               <path
                 key={s.nome}
                 d={pathSuave(linhas[sIdx])}
                 fill="none"
                 stroke={s.cor}
-                strokeWidth="2.4"
+                strokeWidth="2.1"
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
