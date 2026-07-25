@@ -30,6 +30,90 @@ function passoBonito(span: number, maxTicks: number): number {
   return mag * 10;
 }
 
+// Arredonda o cotovelo da série (pedido do cliente 25/jul: "muito retas, podia
+// ser mais suavezinha"). Média móvel triangular de ±JANELA minutos sobre o Y de
+// TELA, com a janela afunilando nas pontas pra não puxar o primeiro/último ponto.
+// Em trecho de inclinação constante a média devolve o mesmo valor — reta segue
+// reta, e é o certo: com a válvula termostática segurando a T. mistura o boiler
+// esfria a °C/min constante. O que muda de verdade é a quebra onde um apoio liga,
+// que deixa de ser bico. O traço sai no máx ~0,3 °C do valor calculado, e SÓ ali;
+// tooltip e tabela minuto a minuto seguem exatos, e o marcador do crosshair é
+// desenhado sobre esta curva pra não ficar solto no ar.
+const JANELA = 2;
+function arredondar(ys: number[]): number[] {
+  return ys.map((_, i) => {
+    const jan = Math.min(JANELA, i, ys.length - 1 - i);
+    let soma = 0;
+    let peso = 0;
+    for (let k = -jan; k <= jan; k++) {
+      const w = 1 + jan - Math.abs(k);
+      soma += ys[i + k] * w;
+      peso += w;
+    }
+    return soma / peso;
+  });
+}
+
+// Traça a série com curva suave em vez de polilinha (pedido do cliente 25/jul).
+// Interpolação cúbica MONOTÔNICA (Fritsch-Carlson), não Catmull-Rom: a curva
+// passa exatamente pelos pontos calculados e nunca faz overshoot entre dois
+// minutos. Num gráfico de engenharia isso é obrigatório — uma barriga pra baixo
+// invadiria a zona de banho frio ou cruzaria a T. mistura num cenário que o
+// indicador diz "Não cruza"; pra cima passaria do set point. Onde o dado é
+// colinear (decaimento sem apoio) as tangentes se igualam e o traço volta a ser
+// reto sozinho; o arredondamento aparece nas quebras (apoio ligando/desligando)
+// e na entrada/saída do leque.
+function pathSuave(pts: { x: number; y: number }[]): string {
+  const n = pts.length;
+  const f = (v: number) => v.toFixed(1);
+  if (n === 0) return "";
+  if (n === 1) return `M${f(pts[0].x)},${f(pts[0].y)}`;
+  if (n === 2) return `M${f(pts[0].x)},${f(pts[0].y)} L${f(pts[1].x)},${f(pts[1].y)}`;
+
+  const h: number[] = []; // Δx do segmento
+  const d: number[] = []; // inclinação da secante
+  for (let k = 0; k < n - 1; k++) {
+    h[k] = pts[k + 1].x - pts[k].x;
+    d[k] = h[k] === 0 ? 0 : (pts[k + 1].y - pts[k].y) / h[k];
+  }
+
+  const m: number[] = new Array(n); // tangente em cada ponto
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let k = 1; k < n - 1; k++) {
+    // extremo local (secantes de sinais opostos) => tangente zero, o pico/vale
+    // continua sendo o ponto real
+    m[k] = d[k - 1] * d[k] <= 0 ? 0 : (d[k - 1] + d[k]) / 2;
+  }
+  // limitador de Fritsch-Carlson: mantém cada segmento dentro do envelope dos
+  // seus dois pontos
+  for (let k = 0; k < n - 1; k++) {
+    if (d[k] === 0) {
+      m[k] = 0;
+      m[k + 1] = 0;
+      continue;
+    }
+    const a = m[k] / d[k];
+    const b = m[k + 1] / d[k];
+    const quad = a * a + b * b;
+    if (quad > 9) {
+      const t = 3 / Math.sqrt(quad);
+      m[k] = t * a * d[k];
+      m[k + 1] = t * b * d[k];
+    }
+  }
+
+  let out = `M${f(pts[0].x)},${f(pts[0].y)}`;
+  for (let k = 0; k < n - 1; k++) {
+    const c1x = pts[k].x + h[k] / 3;
+    const c1y = pts[k].y + (m[k] * h[k]) / 3;
+    const c2x = pts[k + 1].x - h[k] / 3;
+    const c2y = pts[k + 1].y - (m[k + 1] * h[k]) / 3;
+    out += ` C${f(c1x)},${f(c1y)} ${f(c2x)},${f(c2y)} ${f(pts[k + 1].x)},${f(pts[k + 1].y)}`;
+  }
+  return out;
+}
+
 export function LineChart({
   series,
   duracao,
@@ -109,13 +193,13 @@ export function LineChart({
     });
   }
 
-  const pathDe = (pts: number[], sIdx: number) =>
-    pts
-      .map(
-        (v, idx) =>
-          `${idx === 0 ? "M" : "L"}${xAt(idx).toFixed(1)},${(yAt(v) + (offsets[sIdx][idx] ?? 0)).toFixed(1)}`,
-      )
-      .join(" ");
+  // Pontos de tela de cada série, com o offset do leque somado e o cotovelo
+  // arredondado. É esta linha que vira o path E que o crosshair usa pra posicionar
+  // o marcador, então os dois nunca se descolam.
+  const linhas = series.map((s, sIdx) => {
+    const ys = arredondar(s.pontos.map((v, idx) => yAt(v) + (offsets[sIdx][idx] ?? 0)));
+    return ys.map((y, idx) => ({ x: xAt(idx), y }));
+  });
 
   // eixo Y: ticks em passos bonitos (5 °C no caso típico; menos divisões no celular)
   const yStep = passoBonito(span, compact ? 6 : 7);
@@ -229,7 +313,7 @@ export function LineChart({
           {series.map((s, sIdx) => (
             <path
               key={s.nome}
-              d={pathDe(s.pontos, sIdx)}
+              d={pathSuave(linhas[sIdx])}
               fill="none"
               stroke={s.cor}
               strokeWidth="2.4"
@@ -246,7 +330,7 @@ export function LineChart({
                 <circle
                   key={v.nome}
                   cx={hover.x}
-                  cy={yAt(v.v) + (offsets[k][hover.idx] ?? 0)}
+                  cy={linhas[k][hover.idx]?.y ?? yAt(v.v)}
                   r="3.4"
                   fill={v.cor}
                   stroke="#1B1B19"
