@@ -37,8 +37,8 @@ export const MODULOS: Modulo[] = [
   {
     slug: "perfil-boiler",
     nome: "Perfil Térmico do Boiler",
-    desc: "Simula minuto a minuto se o boiler segura banhos simultâneos. Gás × elétrica.",
-    liberado: false,
+    desc: "Simula minuto a minuto se o boiler segura banhos simultâneos, com e sem apoio de gás, resistência e bomba de calor.",
+    liberado: true,
   },
   {
     slug: "caixa-boiler-solar",
@@ -62,7 +62,7 @@ export const MODULOS: Modulo[] = [
     slug: "apoio-gas",
     nome: "Apoio a Gás — Vazão & Seleção",
     desc: "Vazão do sistema por 3 métodos (V.M.P, NBR 16057 e tempo determinado) e sugestão do aquecedor por custo × benefício.",
-    liberado: false,
+    liberado: true,
   },
 ];
 
