@@ -169,6 +169,19 @@ export function LineChart({
   // aparecem lado a lado e voltam a se sobrepor à trajetória exata quando
   // divergem de verdade.
   const SEP = 2.6;
+  // A ordem DENTRO do leque é a ordem em que as séries vão divergir, não a ordem
+  // do array: quem vai ficar por cima já entra por cima. Ordenando pela ordem do
+  // array, as linhas se cruzavam todas no minuto em que o leque fecha e aquilo
+  // virava um nó no meio do gráfico.
+  const ordemDoLeque = (ks: number[], idx: number): number[] => {
+    for (let j = idx + 1; j < duracao; j++) {
+      const vals = ks.map((k) => (series[k].pontos[j] ?? NaN).toFixed(3));
+      if (new Set(vals).size > 1) {
+        return [...ks].sort((a, b) => (series[b].pontos[j] ?? 0) - (series[a].pontos[j] ?? 0));
+      }
+    }
+    return ks; // nunca divergem: qualquer ordem serve
+  };
   const offsets: number[][] = series.map(() => []);
   for (let idx = 0; idx < duracao; idx++) {
     const grupos = new Map<string, number[]>(); // valor -> índices das séries
@@ -177,7 +190,7 @@ export function LineChart({
       grupos.set(key, [...(grupos.get(key) ?? []), k]);
     });
     grupos.forEach((ks) => {
-      ks.forEach((k, pos) => {
+      ordemDoLeque(ks, idx).forEach((k, pos) => {
         offsets[k][idx] = ks.length > 1 ? (pos - (ks.length - 1) / 2) * SEP : 0;
       });
     });
