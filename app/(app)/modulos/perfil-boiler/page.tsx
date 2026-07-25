@@ -41,8 +41,37 @@ interface Form {
   deltaTAquecimento: number;
 }
 
-// Defaults = aba Parâmetros da planilha V3.
-const PADRAO: Form = {
+// O formulário ABRE ZERADO (áudio do cliente 25/jul: "deixa configurado pra vir
+// tudo zerado quando o cara abrir, tá vindo com números aleatórios"). Exceções
+// conscientes: `duracao` é a janela do gráfico, não dado do projeto, e zerada
+// não sobraria eixo nenhum; os toggles de apoio começam ligados pra o cara ver
+// os cenários assim que preencher.
+const ZERADO: Form = {
+  tSetPoint: 0,
+  volume: 0,
+  tInicial: 0,
+  tFria: 0,
+  tMistura: 0,
+  nBanhos: 0,
+  vazaoDucha: 0,
+  duracao: 60,
+  gasKcalh: 0,
+  gasRendimento: 0,
+  histGas: 0,
+  eletKW: 0,
+  histElet: 0,
+  bombaBTUh: 0,
+  histBomba: 0,
+  gasAtivo: true,
+  eletAtivo: true,
+  bombaAtivo: true,
+  deltaTAquecimento: 0,
+};
+
+// Aba Parâmetros da planilha V3. Não é mais o estado inicial: serve de exemplo
+// de um clique (útil pra gravar aula) e de fallback pra projeto salvo antigo a
+// que falte um campo.
+const EXEMPLO: Form = {
   tSetPoint: 50,
   volume: 1000,
   tInicial: 50,
@@ -70,29 +99,29 @@ function normalizarForm(raw: unknown): Form {
   const r = (raw ?? {}) as Partial<Form> & { histerese?: number };
   const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
   const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
-  const histLegado = num(r.histerese, PADRAO.histGas);
+  const histLegado = num(r.histerese, EXEMPLO.histGas);
   return {
-    tSetPoint: num(r.tSetPoint, PADRAO.tSetPoint),
-    volume: num(r.volume, PADRAO.volume),
-    tInicial: num(r.tInicial, PADRAO.tInicial),
-    tFria: num(r.tFria, PADRAO.tFria),
-    tMistura: num(r.tMistura, PADRAO.tMistura),
-    nBanhos: num(r.nBanhos, PADRAO.nBanhos),
-    vazaoDucha: num(r.vazaoDucha, PADRAO.vazaoDucha),
+    tSetPoint: num(r.tSetPoint, EXEMPLO.tSetPoint),
+    volume: num(r.volume, EXEMPLO.volume),
+    tInicial: num(r.tInicial, EXEMPLO.tInicial),
+    tFria: num(r.tFria, EXEMPLO.tFria),
+    tMistura: num(r.tMistura, EXEMPLO.tMistura),
+    nBanhos: num(r.nBanhos, EXEMPLO.nBanhos),
+    vazaoDucha: num(r.vazaoDucha, EXEMPLO.vazaoDucha),
     // coefPerdas (schema antigo) é descartado — campo removido a pedido do cliente 23/jul
-    duracao: num(r.duracao, PADRAO.duracao),
-    gasKcalh: num(r.gasKcalh, PADRAO.gasKcalh),
-    gasRendimento: num(r.gasRendimento, PADRAO.gasRendimento),
+    duracao: num(r.duracao, EXEMPLO.duracao),
+    gasKcalh: num(r.gasKcalh, EXEMPLO.gasKcalh),
+    gasRendimento: num(r.gasRendimento, EXEMPLO.gasRendimento),
     histGas: num(r.histGas, histLegado),
-    eletKW: num(r.eletKW, PADRAO.eletKW),
+    eletKW: num(r.eletKW, EXEMPLO.eletKW),
     histElet: num(r.histElet, histLegado),
-    bombaBTUh: num(r.bombaBTUh, PADRAO.bombaBTUh),
+    bombaBTUh: num(r.bombaBTUh, EXEMPLO.bombaBTUh),
     histBomba: num(r.histBomba, histLegado),
     // projetos salvos antes dos toggles: os 3 apoios ativos (= comportamento anterior)
     gasAtivo: bool(r.gasAtivo, true),
     eletAtivo: bool(r.eletAtivo, true),
     bombaAtivo: bool(r.bombaAtivo, true),
-    deltaTAquecimento: num(r.deltaTAquecimento, PADRAO.deltaTAquecimento),
+    deltaTAquecimento: num(r.deltaTAquecimento, EXEMPLO.deltaTAquecimento),
   };
 }
 
@@ -101,7 +130,7 @@ function toInputs(f: Form): Inputs {
 }
 
 export default function PerfilBoiler() {
-  const [f, setF] = useState<Form>(PADRAO);
+  const [f, setF] = useState<Form>(ZERADO);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
 
   // abertura dos accordions de apoio (UI-only, não persiste): toggle ON abre, OFF
@@ -141,7 +170,7 @@ export default function PerfilBoiler() {
     const atual = JSON.stringify(f);
     if (projetoId && atual === snapshot.current) {
       setEstado("salvo");
-    } else if (projetoId || atual !== JSON.stringify(PADRAO)) {
+    } else if (projetoId || atual !== JSON.stringify(ZERADO)) {
       setEstado("nao-salvo");
     }
   }, [f, projetoId]);
@@ -193,7 +222,7 @@ export default function PerfilBoiler() {
   }
 
   function novo() {
-    setF(PADRAO);
+    setF(ZERADO);
     setAbertos({ gas: true, elet: true, bomba: true });
     setProjetoId(null);
     setCliente("");
@@ -206,6 +235,14 @@ export default function PerfilBoiler() {
   // --- cálculo ao vivo ---
   const r = useMemo(() => calcular(toInputs(f)), [f]);
   const { derivados: d, cenarios, aquecimento, validacao } = r;
+
+  // Com o formulário zerado o cálculo dividiria por volume 0 e o gráfico receberia
+  // NaN, então os resultados só aparecem quando o motor tem o que precisa.
+  const pronto =
+    f.volume > 0 && f.duracao > 0 && f.nBanhos > 0 && f.vazaoDucha > 0 && validacao.ok;
+  // formulário ainda intocado: não faz sentido cobrar a ordem TF < TM < TQ de quem
+  // acabou de abrir a tela
+  const virgem = JSON.stringify(f) === JSON.stringify(ZERADO);
 
   // --- gráfico: séries dos cenários ativos + referências ---
   const chart = useMemo(() => {
@@ -265,7 +302,7 @@ export default function PerfilBoiler() {
         </div>
 
         {/* aviso de validação física TF < TM < TQ */}
-        {!validacao.ok && (
+        {!validacao.ok && !virgem && (
           <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
             {validacao.mensagem}
           </div>
@@ -457,18 +494,49 @@ export default function PerfilBoiler() {
                 <span className="hidden text-[10px] text-zinc-500 sm:block">eixo Y em °C · eixo X em minutos</span>
               </div>
 
-              <LineChart
-                series={chart.series}
-                duracao={f.duracao}
-                yMin={chart.yMin}
-                yMax={chart.yMax}
-                refs={chart.refs}
-                zonaAbaixoDe={f.tMistura}
-                zonaLabel="zona de banho frio"
-              />
+              {pronto ? (
+                <LineChart
+                  series={chart.series}
+                  duracao={f.duracao}
+                  yMin={chart.yMin}
+                  yMax={chart.yMax}
+                  refs={chart.refs}
+                  zonaAbaixoDe={f.tMistura}
+                  zonaLabel="zona de banho frio"
+                />
+              ) : (
+                <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 px-6 text-center">
+                  <svg width="46" height="34" viewBox="0 0 46 34" fill="none" aria-hidden>
+                    <path
+                      d="M2 4v26h42"
+                      stroke="#3A3A36"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M6 10c8 0 10 14 18 14s10-8 18-8"
+                      stroke="#FABA0D"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      opacity="0.55"
+                      strokeDasharray="3 3"
+                    />
+                  </svg>
+                  <p className="max-w-xs text-sm leading-relaxed text-zinc-400">
+                    Preencha o volume do boiler e as temperaturas pra ver o decaimento térmico.
+                  </p>
+                  <button
+                    onClick={() => setF(EXEMPLO)}
+                    className="rounded-xl border border-ink-600 px-4 py-2 text-sm text-zinc-300 active:scale-95"
+                  >
+                    Usar valores de exemplo
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* tempo até cruzar TM, por cenário */}
+            {pronto && (
             <div className="rounded-2xl border border-ink-600 bg-ink-800/60 p-4">
               <h3 className="mb-2 font-display text-xs font-bold uppercase tracking-wider text-zinc-200">
                 Tempo até cruzar a T. mistura ({f.tMistura.toFixed(0)} °C)
@@ -496,6 +564,7 @@ export default function PerfilBoiler() {
                 o banho começa a esfriar.
               </p>
             </div>
+            )}
           </div>
         </div>
 
@@ -554,7 +623,9 @@ export default function PerfilBoiler() {
           </p>
         </div>
 
-        {/* DETALHES + TABELA MINUTO A MINUTO */}
+        {/* DETALHES + TABELA MINUTO A MINUTO (só com o formulário preenchido:
+            zerado, o motor devolveria NaN em toda linha) */}
+        {pronto && (
         <div className="mt-4 space-y-4">
           <Accordion title="Detalhes técnicos (auditar)">
             {/* linhas de apoio desligado somem ("não fica poluído", vídeo 3) */}
@@ -615,6 +686,7 @@ export default function PerfilBoiler() {
             </p>
           </Accordion>
         </div>
+        )}
 
         {/* MEUS PROJETOS */}
         <div className="mt-4 rounded-2xl border border-ink-600 bg-ink-800/60 p-4">

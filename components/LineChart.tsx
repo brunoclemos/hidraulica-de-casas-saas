@@ -331,7 +331,7 @@ export function LineChart({
                 d={pathSuave(linhas[sIdx])}
                 fill="none"
                 stroke={s.cor}
-                strokeWidth="2.1"
+                strokeWidth="1.2"
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
