@@ -149,7 +149,20 @@ function simularCombo(i: Inputs, d: Derivados, cenario: Cenario, apoios: Apoio[]
         ligado[k] = ligado[k] ? tPrev < i.tSetPoint : tPrev <= i.tSetPoint - a.hist;
       });
       const ganho = apoios.reduce((s, a, k) => s + (ligado[k] ? a.potKcalh : 0), 0) / (60 * i.volume);
-      tBoiler = tPrev - d.consumoPorMin + ganho;
+      // Acima da T. mistura a válvula termostática compensa: conforme o boiler
+      // esfria ela puxa proporcionalmente mais água quente, e a queda em °C/min
+      // fica constante (é a fórmula da planilha V3). Abaixo da T. mistura a
+      // válvula já está toda aberta e não tem o que compensar: a vazão vira a
+      // vazão dos banhos e a queda passa a ser proporcional a (T − T. fria),
+      // desacelerando rumo à água fria. Em T = TM as duas dão o MESMO valor, então
+      // a emenda é contínua. Sem isso a reta segue pra baixo indefinidamente e o
+      // boiler chega a ficar mais frio que a água que entra nele (com 4 banhos,
+      // −10,6 °C no minuto 60), o que é impossível.
+      const consumo =
+        tPrev > i.tMistura
+          ? d.consumoPorMin
+          : ((i.nBanhos * i.vazaoDucha) / i.volume) * (tPrev - i.tFria);
+      tBoiler = tPrev - consumo + ganho;
     }
 
     apoios.forEach((_, k) => status[k].push(ligado[k]));
