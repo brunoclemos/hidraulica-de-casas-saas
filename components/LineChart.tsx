@@ -338,15 +338,18 @@ export function LineChart({
             ))}
           </g>
 
-          {/* etiquetas das referências POR CIMA das curvas, em pastilha opaca:
-              à direita brigavam com o valor final, e só o halo do texto não
-              vencia uma linha de 2,4 px com brilho passando por baixo */}
+          {/* Etiquetas das referências à DIREITA, como sempre foram (o cliente
+              cobrou a volta), mas desenhadas DEPOIS das curvas e sobre pastilha
+              opaca: era passando por baixo das linhas que elas sumiam. O valor
+              final de cada curva fica fora da área de plotagem, então os dois
+              não se encontram. */}
           {refsVisiveis.map((r, k) => {
             const y = yAt(r.valor);
+            const largura = r.label.length * 5.1 + 10;
             return (
               <g key={`refLabel${k}`}>
-                <rect x={ml + 4} y={y - 14.5} width={r.label.length * 5.1 + 10} height="13.5" rx="4" fill="#1B1B19" opacity="0.94" />
-                <text x={ml + 9} y={y - 5} textAnchor="start" fontSize="9.5" fill={r.cor}>
+                <rect x={W - mr - 4 - largura} y={y - 14.5} width={largura} height="13.5" rx="4" fill="#1B1B19" opacity="0.94" />
+                <text x={W - mr - 9} y={y - 5} textAnchor="end" fontSize="9.5" fill={r.cor}>
                   {r.label}
                 </text>
               </g>
