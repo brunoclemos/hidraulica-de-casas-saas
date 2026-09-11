@@ -208,6 +208,16 @@ export default function PvcCpvcPressao() {
 
   const r = useMemo(() => calcularTrecho(draft, entradaDraft), [draft, entradaDraft]);
 
+  // Report do cliente 11/09: o modo manual abria zerado e o engenheiro redigitava a vazão
+  // ARREDONDADA que lia na tela (30 em vez de 29,4x), divergindo do método dos pesos.
+  // Levar o valor cheio evita a divergência; só preenche campo vazio, não apaga o digitado.
+  function trocarModoVazao(modo: TrechoSalvo["modoVazao"]) {
+    const herdaVazaoDosPesos = modo === "manual" && !(draft.vazaoManualLmin > 0) && r.vazaoLmin > 0;
+    setDraftPatch(
+      herdaVazaoDosPesos ? { modoVazao: modo, vazaoManualLmin: r.vazaoLmin } : { modoVazao: modo },
+    );
+  }
+
   // resumo do projeto (a casa toda)
   const reprovados = projeto.filter((p) => !p.resultado.residualOk).length;
   const criticaResidual = projeto.length
@@ -514,7 +524,7 @@ export default function PvcCpvcPressao() {
                 <button
                   key={modo}
                   type="button"
-                  onClick={() => setDraftPatch({ modoVazao: modo })}
+                  onClick={() => trocarModoVazao(modo)}
                   className={`rounded-xl border py-2.5 text-sm font-semibold transition ${
                     draft.modoVazao === modo
                       ? "border-amber bg-amber/10 text-amber"
@@ -570,10 +580,14 @@ export default function PvcCpvcPressao() {
                   </div>
                 ))}
               </div>
-              <div className="mt-2 text-[11px] text-zinc-500">
+              <div className="mt-2 text-[11px] leading-relaxed text-zinc-500">
                 Soma dos pesos:{" "}
                 <span className="font-semibold text-zinc-300">{r.somaPesos.toFixed(2)}</span> → vazão{" "}
-                {r.vazaoLmin.toFixed(1)} L/min
+                <span className="font-semibold text-zinc-300">{r.vazaoLmin.toFixed(2)} L/min</span> (
+                {r.vazaoLs.toFixed(3)} L/s).
+                <br />
+                O cálculo usa o valor cheio, sem arredondar. Ao mudar para “Vazão manual” ele já
+                entra no campo — digitar o número arredondado dá outro resultado.
               </div>
             </>
           )}
@@ -700,7 +714,7 @@ export default function PvcCpvcPressao() {
             <div className="mt-3 space-y-1 rounded-xl border border-ink-600 bg-ink-900/40 px-3 py-2 text-[12px] text-zinc-400">
               {draft.monocomando && (
                 <div>
-                  Perda do monocomando em {r.vazaoLmin.toFixed(1)} L/min:{" "}
+                  Perda do monocomando em {r.vazaoLmin.toFixed(2)} L/min:{" "}
                   <span className="font-semibold text-amber">{r.perdaMonocomando.toFixed(2)} mca</span>
                   {r.monocomandoAcima && (
                     <span className="block text-amber">
@@ -717,7 +731,7 @@ export default function PvcCpvcPressao() {
               )}
               {draft.chuveiro && (
                 <div>
-                  Exigência no ponto em {r.vazaoLmin.toFixed(1)} L/min:{" "}
+                  Exigência no ponto em {r.vazaoLmin.toFixed(2)} L/min:{" "}
                   <span className="font-semibold text-amber">{r.pressaoMinima.toFixed(2)} mca</span>
                   {r.chuveiroAcima && (
                     <span className="block text-amber">
@@ -854,7 +868,7 @@ export default function PvcCpvcPressao() {
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">
-          <Hero titulo="Vazão" valor={`${r.vazaoLs.toFixed(3)} L/s`} sub={`${r.vazaoLmin.toFixed(1)} L/min`} />
+          <Hero titulo="Vazão" valor={`${r.vazaoLs.toFixed(3)} L/s`} sub={`${r.vazaoLmin.toFixed(2)} L/min`} />
           <Hero
             titulo="Velocidade"
             valor={`${r.velocidade.toFixed(2)} m/s`}
