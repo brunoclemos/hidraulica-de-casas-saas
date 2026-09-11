@@ -602,27 +602,52 @@ export default function PvcCpvcPressao() {
             Toque na estrela pra fixar no topo as que você mais usa.
           </p>
           <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-            {conexoesOrdenadas.map((c) => (
-              <div key={c.id} className="flex items-center gap-2">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={draft.conexoes[c.id] ?? 0}
-                  onChange={(e) => setConexao(c.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
-                  onWheel={(e) => e.currentTarget.blur()}
-                  className="w-14 rounded-lg border border-ink-600 bg-ink-800 px-2 py-1.5 text-center text-sm font-semibold text-zinc-100 outline-none focus:border-amber/60"
-                />
-                <span className="min-w-0 flex-1 text-[12px] leading-tight text-zinc-400">
-                  {c.nome}
-                  <span className="text-zinc-600"> · {(c.valores[draft.diametro] ?? 0).toFixed(2)} m</span>
-                </span>
-                <EstrelaFavorita
-                  ativa={favoritas.has(c.id)}
-                  onClick={() => setFavoritas(new Set(alternarFavorita(c.id)))}
-                />
-              </div>
-            ))}
+            {conexoesOrdenadas.map((c) => {
+              const qtd = draft.conexoes[c.id] ?? 0;
+              return (
+                <div key={c.id} className="flex items-center gap-1.5">
+                  {/* Report do cliente 11/09: contar tê de passagem direta x tê de saída
+                      bilateral no braço, sem somar de cabeça. O campo segue digitável
+                      (lançar 12 de uma vez pelo teclado continua valendo). */}
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={`Menos um ${c.nome}`}
+                      disabled={qtd === 0}
+                      onClick={() => setConexao(c.id, qtd - 1)}
+                      className="h-9 w-9 rounded-lg border border-ink-600 bg-ink-800 text-base font-bold text-amber active:scale-95 disabled:text-zinc-700 disabled:active:scale-100"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={qtd}
+                      onChange={(e) => setConexao(c.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                      onWheel={(e) => e.currentTarget.blur()}
+                      className="h-9 w-12 rounded-lg border border-ink-600 bg-ink-800 px-1 text-center text-sm font-semibold text-zinc-100 outline-none focus:border-amber/60"
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Mais um ${c.nome}`}
+                      onClick={() => setConexao(c.id, qtd + 1)}
+                      className="h-9 w-9 rounded-lg border border-ink-600 bg-ink-800 text-base font-bold text-amber active:scale-95"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <span className="min-w-0 flex-1 text-[12px] leading-tight text-zinc-400">
+                    {c.nome}
+                    <span className="text-zinc-600"> · {(c.valores[draft.diametro] ?? 0).toFixed(2)} m</span>
+                  </span>
+                  <EstrelaFavorita
+                    ativa={favoritas.has(c.id)}
+                    onClick={() => setFavoritas(new Set(alternarFavorita(c.id)))}
+                  />
+                </div>
+              );
+            })}
           </div>
         </Accordion>
 
