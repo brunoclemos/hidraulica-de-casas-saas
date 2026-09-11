@@ -132,6 +132,25 @@ export default function PvcCpvcPressao() {
     refresh();
   }
 
+  // Paridade com os outros módulos: duplica o projeto atual (trechos, cenários e bomba
+  // junto) num registro novo, para partir de um dimensionamento pronto sem sobrescrever.
+  function salvarComoNovo() {
+    setEstado("salvando");
+    const p = salvarProjeto<Form>({
+      id: undefined,
+      modulo: MODULO,
+      cliente: cliente.trim() || undefined,
+      nome: nome.trim() || "Sem nome",
+      inputs: f,
+    });
+    setProjetoId(p.id);
+    setNome(p.nome);
+    snapshot.current = JSON.stringify(f);
+    setSalvoEm(p.atualizadoEm);
+    setEstado("salvo");
+    refresh();
+  }
+
   function carregar(p: Projeto) {
     const raw = (p.inputs ?? {}) as Partial<Form>;
     // MIGRAÇÃO: projetos salvos em schema antigo podem não ter `trechos`, ou ter
@@ -1376,7 +1395,7 @@ export default function PvcCpvcPressao() {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={inserir}
                 className="flex-1 rounded-xl bg-amber py-3 font-display text-sm font-bold uppercase tracking-wider text-ink-900 active:scale-95"
@@ -1396,6 +1415,14 @@ export default function PvcCpvcPressao() {
               >
                 {projetoId ? "Atualizar" : "Salvar projeto"}
               </button>
+              {projetoId && (
+                <button
+                  onClick={salvarComoNovo}
+                  className="order-last basis-full rounded-xl border border-ink-600 px-3 py-2.5 text-sm text-zinc-400 active:scale-95 sm:order-none sm:basis-auto sm:py-3"
+                >
+                  Salvar como novo
+                </button>
+              )}
             </div>
           )}
           {/* campo de nome no mobile */}
