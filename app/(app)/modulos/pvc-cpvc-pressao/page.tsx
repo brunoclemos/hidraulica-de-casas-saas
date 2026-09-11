@@ -49,7 +49,7 @@ const MODULO = "pvc-cpvc-pressao";
 // Um PROJETO = várias INSERÇÕES (trechos) acumuladas, como nas macros do Excel.
 // O "rascunho" é a inserção que está sendo montada; só entra no projeto ao clicar "Inserir".
 interface Form {
-  material: Material;
+  material: Material; // material da PRÓXIMA inserção; cada trecho guarda o seu
   residualInicial: number; // mca disponível na entrada do projeto
   trechos: TrechoSalvo[]; // inserções já confirmadas
   cenarios: number[]; // vazões de tronco (L/min) da curva do sistema (vídeos 4/5)
@@ -66,8 +66,9 @@ function freshDraft(material: Material, count: number, base?: TrechoSalvo): Trec
     // ambiente em sequência (ex.: Banheiro suíte: A-B, B-C, C-D).
     ambiente: base?.ambiente ?? "",
     nome: `Trecho ${count + 1}`,
-    // mantém escolhas comuns entre inserções para agilizar (engenheiro repete bitola/peça)
-    diametro: base?.diametro ?? d.diametro,
+    // mantém escolhas comuns entre inserções para agilizar (engenheiro repete bitola/peça).
+    // A bitola só é herdada dentro do mesmo material: 25 mm existe em PVC e não em CPVC.
+    diametro: base && base.material === material ? base.diametro : d.diametro,
     temperaturaAgua: base?.temperaturaAgua ?? d.temperaturaAgua,
   };
 }
@@ -171,18 +172,13 @@ export default function PvcCpvcPressao() {
     setEstado("nao-salvo");
   }
 
+  // O material é POR TRECHO (vídeo do cliente 10/09): o projeto real vai do boiler ao
+  // ponto de uso com a transição PVC → CPVC no meio. O toggle só mexe no RASCUNHO —
+  // converter as inserções já feitas apagava as conexões lançadas e mudava a residual.
+  // As conexões do rascunho zeram porque as matrizes não têm ids em comum (16 x 32 tipos).
   function trocarMaterial(material: Material) {
-    setF((p) => ({
-      ...p,
-      material,
-      trechos: p.trechos.map((tr) => ({
-        ...tr,
-        material,
-        diametro: diametrosDe(material)[1].comercial,
-        conexoes: {},
-      })),
-    }));
     setDraft((d) => ({ ...d, material, diametro: diametrosDe(material)[1].comercial, conexoes: {} }));
+    set("material", material); // só o default da próxima inserção
   }
 
   // helpers do rascunho
@@ -217,6 +213,14 @@ export default function PvcCpvcPressao() {
   const criticaResidual = projeto.length
     ? Math.min(...projeto.map((p) => p.resultado.pressaoResidual))
     : null;
+  // projeto pode misturar PVC e CPVC: o resumo mostra quantas inserções são de cada um.
+  const qtdPvc = f.trechos.filter((t) => t.material === "PVC").length;
+  const mistura = [
+    qtdPvc ? `${qtdPvc}× PVC` : "",
+    f.trechos.length - qtdPvc ? `${f.trechos.length - qtdPvc}× CPVC` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   // agrupa as inserções por AMBIENTE (hierarquia projeto › ambiente › trechos),
   // preservando o índice global de cada trecho (usado em editar/excluir/encadeamento).
@@ -335,7 +339,7 @@ export default function PvcCpvcPressao() {
   // ações de inserção (igual às macros: vai inserindo, NÃO fecha o projeto)
   function inserir() {
     setF((p) => ({ ...p, trechos: [...p.trechos, { ...draft }] }));
-    setDraft((d) => freshDraft(f.material, f.trechos.length + 1, d));
+    setDraft((d) => freshDraft(d.material, f.trechos.length + 1, d));
     setEditIndex(null);
   }
   function salvarEdicao() {
@@ -344,7 +348,7 @@ export default function PvcCpvcPressao() {
       ...p,
       trechos: p.trechos.map((x, i) => (i === editIndex ? { ...draft } : x)),
     }));
-    setDraft(freshDraft(f.material, f.trechos.length));
+    setDraft(freshDraft(draft.material, f.trechos.length));
     setEditIndex(null);
   }
   function editar(i: number) {
@@ -353,7 +357,7 @@ export default function PvcCpvcPressao() {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   function cancelarEdicao() {
-    setDraft(freshDraft(f.material, f.trechos.length));
+    setDraft(freshDraft(draft.material, f.trechos.length));
     setEditIndex(null);
   }
   function excluirInsercao(i: number) {
@@ -367,8 +371,8 @@ export default function PvcCpvcPressao() {
     }
   }
 
-  const opcoesDiam = diametrosDe(f.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
-  const conexoes = conexoesDe(f.material);
+  const opcoesDiam = diametrosDe(draft.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
+  const conexoes = conexoesDe(draft.material);
   // Favoritas sobem pro topo (áudio do cliente 22/jul); sort estável preserva a
   // ordem da planilha entre as demais. Carrega no effect pra não divergir do SSR.
   const [favoritas, setFavoritas] = useState<Set<string>>(new Set());
@@ -377,13 +381,13 @@ export default function PvcCpvcPressao() {
   }, []);
   const conexoesOrdenadas = useMemo(
     () =>
-      [...conexoesDe(f.material)].sort(
+      [...conexoesDe(draft.material)].sort(
         (a, b) => Number(favoritas.has(b.id)) - Number(favoritas.has(a.id)),
       ),
-    [f.material, favoritas],
+    [draft.material, favoritas],
   );
   const tiposConexoesAtivos = Object.values(draft.conexoes).filter((q) => q > 0).length;
-  const isAQ = f.material === "CPVC";
+  const isAQ = draft.material === "CPVC"; // água quente: campos do RASCUNHO (temperatura, válvula, Reynolds)
   const editando = editIndex !== null;
 
   return (
@@ -406,21 +410,29 @@ export default function PvcCpvcPressao() {
         <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
       </div>
 
-      {/* TOGGLE AF (PVC) x AQ (CPVC) */}
-      <div className="grid grid-cols-2 gap-2">
-        {(["PVC", "CPVC"] as Material[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => trocarMaterial(m)}
-            className={`rounded-xl border py-3 text-sm font-semibold transition ${
-              f.material === m
-                ? "border-amber bg-amber/10 text-amber"
-                : "border-ink-600 bg-ink-800 text-zinc-400"
-            }`}
-          >
-            {m === "PVC" ? "Água fria · PVC (AF)" : "Água quente · CPVC (AQ)"}
-          </button>
-        ))}
+      {/* TOGGLE AF (PVC) x AQ (CPVC) — vale só para a inserção em montagem/edição */}
+      <div>
+        <div className="grid grid-cols-2 gap-2">
+          {(["PVC", "CPVC"] as Material[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => trocarMaterial(m)}
+              className={`rounded-xl border py-3 text-sm font-semibold transition ${
+                draft.material === m
+                  ? "border-amber bg-amber/10 text-amber"
+                  : "border-ink-600 bg-ink-800 text-zinc-400"
+              }`}
+            >
+              {m === "PVC" ? "Água fria · PVC (AF)" : "Água quente · CPVC (AQ)"}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+          O material vale para{" "}
+          {editando ? `a inserção ${editIndex! + 1}` : "a inserção que você está montando"} — as que
+          já estão no projeto não mudam. Dá pra fazer a transição PVC → CPVC no meio do mesmo
+          projeto (boiler ao ponto de uso).
+        </p>
       </div>
 
       {/* FORM do rascunho (inserção atual) */}
@@ -571,7 +583,7 @@ export default function PvcCpvcPressao() {
             (2 colunas, input pequeno) + resumo no título, no padrão do Circuladores. */}
         <Accordion title={`Conexões · ${tiposConexoesAtivos} tipo(s) · ${r.compEquivalente.toFixed(2)} m`}>
           <p className="mb-2 text-[11px] leading-relaxed text-zinc-500">
-            Tabela completa de conexões {f.material} da planilha do curso ({conexoes.length} tipos).
+            Tabela completa de conexões {draft.material} da planilha do curso ({conexoes.length} tipos).
             O número ao lado de cada peça é o comp. equivalente na bitola {draft.diametro} mm.
             Toque na estrela pra fixar no topo as que você mais usa.
           </p>
@@ -771,7 +783,7 @@ export default function PvcCpvcPressao() {
           <div className="grid grid-cols-2 gap-3 text-sm text-zinc-300">
             <Det l="Ø interno" v={`${r.diametroInterno} mm`} />
             <Det l="Comp. total" v={`${r.compTotal.toFixed(2)} m`} />
-            {f.material === "PVC" ? (
+            {draft.material === "PVC" ? (
               <>
                 <Det l="J unitária (FWH)" v={`${r.perdaUnitaria.toFixed(5)} mca/m`} />
                 <Det l="Perda tubulação" v={`${r.perdaCargaTubulacao.toFixed(4)} mca`} />
@@ -810,7 +822,7 @@ export default function PvcCpvcPressao() {
             {editando
               ? `Editando: ${[draft.ambiente, draft.nome].filter(Boolean).join(" · ")}`
               : "Inserção atual (prévia)"}{" "}
-            · {f.material} {draft.diametro} mm
+            · {draft.material} {draft.diametro} mm
           </span>
           <span
             className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
@@ -910,6 +922,11 @@ export default function PvcCpvcPressao() {
             alerta={reprovados > 0}
           />
         </div>
+        {mistura && (
+          <p className="mt-3 text-center text-[11px] text-zinc-500">
+            Materiais: <span className="font-semibold text-zinc-300">{mistura}</span>
+          </p>
+        )}
       </div>
 
       {/* LISTA DE INSERÇÕES DO PROJETO */}
@@ -951,7 +968,7 @@ export default function PvcCpvcPressao() {
                           <div className="truncate text-sm font-medium text-zinc-100">
                             {p.trecho.nome || "Trecho"}
                             <span className="text-zinc-500">
-                              {" "}· {f.material} {p.trecho.diametro}mm
+                              {" "}· {p.trecho.material} {p.trecho.diametro}mm
                             </span>
                             {p.trecho.noTronco && <span className="ml-1 text-amber">· tronco</span>}
                             {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
@@ -1266,6 +1283,10 @@ export default function PvcCpvcPressao() {
           <ul className="space-y-2">
             {projetos.map((p) => {
               const inp = p.inputs as Form;
+              // material é por trecho: o projeto pode ser misto (PVC + CPVC)
+              const materiais =
+                Array.from(new Set((inp.trechos ?? []).map((t) => t.material))).join(" + ") ||
+                inp.material;
               return (
                 <li
                   key={p.id}
@@ -1276,7 +1297,7 @@ export default function PvcCpvcPressao() {
                   <button onClick={() => carregar(p)} className="min-w-0 flex-1 text-left">
                     <div className="truncate text-sm font-medium text-zinc-100">{p.nome}</div>
                     <div className="text-[11px] text-zinc-500">
-                      {inp.material} · {inp.trechos?.length ?? 0} inserção(ões) · salvo{" "}
+                      {materiais} · {inp.trechos?.length ?? 0} inserção(ões) · salvo{" "}
                       {tempoRelativo(p.atualizadoEm)}
                     </div>
                   </button>
