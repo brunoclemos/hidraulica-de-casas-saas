@@ -79,6 +79,22 @@ export function coefNBR(temp: number): { e: number; interpolado: boolean } {
   return { e: coefInterpolado(temp), interpolado: true };
 }
 
+// === Unidade de pressão ==============================================
+// O motor raciocina em BAR e em pressão absoluta, como a planilha, a NBR 16057
+// e o catálogo da válvula de segurança. A UI pede m.c.a. (padronizando com o
+// módulo de Pressurização) e converte aqui na fronteira: h = P/(ρ·g), com
+// ρ = 1000 kg/m³ e g = 9,806 m/s² → 1 bar = 100.000 / (1000 × 9,806) mca.
+export const MCA_POR_BAR = 10.1978;
+
+/**
+ * bar → mca, arredondado na 6ª casa (0,001 mm de coluna d'água) só para o campo
+ * não exibir o lixo de ponto flutuante do produto (3 bar daria 30.593400000000003).
+ * A volta por `mcaParaBar` reconstrói o valor original com erro de último bit.
+ */
+export const barParaMca = (bar: number) => Math.round(bar * MCA_POR_BAR * 1e6) / 1e6;
+
+export const mcaParaBar = (mca: number) => mca / MCA_POR_BAR;
+
 // === Inputs unificados ===============================================
 export interface Inputs {
   tempBoiler: number; // °C (Tabela A.1 / tm do Caleffi)

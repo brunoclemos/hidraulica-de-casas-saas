@@ -6,6 +6,9 @@ import {
   calcular,
   Inputs,
   TABELA_A1,
+  MCA_POR_BAR,
+  barParaMca,
+  mcaParaBar,
   coefNBR,
   vasoComercialAcima,
 } from "@/lib/calc/vaso-expansao";
@@ -27,29 +30,53 @@ const MODULO = "vaso-expansao";
 interface Form {
   tempBoiler: number;
   volume: number;
-  pSist: number;
-  pValv: number;
+  pSist: number; // mca
+  pValv: number; // mca
+  /** Marca de unidade: projeto SEM este campo foi salvo com as pressões em bar. */
+  unidade: "mca";
 }
 
 const PADRAO: Form = {
   tempBoiler: 50,
   volume: 1000,
-  pSist: 3,
-  pValv: 4,
+  pSist: barParaMca(3),
+  pValv: barParaMca(4),
+  unidade: "mca",
 };
+
+// Até 09/2026 o formulário pedia bar e gravava bar. Sem esta conversão, um projeto
+// antigo de 4 bar reabriria valendo 4 mca (≈ 0,4 bar) e entregaria um dimensionamento
+// errado em silêncio.
+function normalizarForm(raw: unknown): Form {
+  const r = (raw ?? {}) as Partial<Form>;
+  const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+  const emMca = r.unidade === "mca";
+  const pressao = (v: unknown, padraoMca: number) =>
+    typeof v === "number" && Number.isFinite(v) ? (emMca ? v : barParaMca(v)) : padraoMca;
+  return {
+    tempBoiler: num(r.tempBoiler, PADRAO.tempBoiler),
+    volume: num(r.volume, PADRAO.volume),
+    pSist: pressao(r.pSist, PADRAO.pSist),
+    pValv: pressao(r.pValv, PADRAO.pValv),
+    unidade: "mca",
+  };
+}
 
 function toInputs(f: Form): Inputs {
   return {
     tempBoiler: f.tempBoiler,
     volume: f.volume,
-    pSist: f.pSist,
-    pValv: f.pValv,
+    pSist: mcaParaBar(f.pSist),
+    pValv: mcaParaBar(f.pValv),
   };
 }
 
 const fmtL = (v: number) => (isFinite(v) ? `${v.toFixed(1)} L` : "—");
 const fmtBar = (v: number) => `${v.toFixed(2)} bar`;
 const fmtCoef = (v: number) => v.toFixed(5);
+// Quem confere com a planilha e com o catálogo da válvula pensa em bar.
+const equivBar = (bar: number) =>
+  isFinite(bar) ? `≈ ${bar.toFixed(2).replace(".", ",")} bar` : "—";
 
 export default function VasoExpansao() {
   const [f, setF] = useState<Form>(PADRAO);
@@ -128,11 +155,14 @@ export default function VasoExpansao() {
   }
 
   function carregar(p: Projeto) {
-    setF(p.inputs as Form);
+    const form = normalizarForm(p.inputs);
+    setF(form);
     setProjetoId(p.id);
     setCliente(p.cliente ?? "");
     setNome(p.nome);
-    snapshot.current = JSON.stringify(p.inputs);
+    // snapshot da forma NORMALIZADA: senão o projeto convertido de bar para mca
+    // divergiria do estado e apareceria como "não salvo" sem o usuário mexer.
+    snapshot.current = JSON.stringify(form);
     setSalvoEm(p.atualizadoEm);
     setEstado("salvo");
   }
@@ -148,7 +178,8 @@ export default function VasoExpansao() {
   }
 
   // --- cálculo ao vivo ---
-  const r = useMemo(() => calcular(toInputs(f)), [f]);
+  const emBar = useMemo(() => toInputs(f), [f]);
+  const r = useMemo(() => calcular(emBar), [emBar]);
   const coefInfo = useMemo(() => coefNBR(f.tempBoiler), [f.tempBoiler]);
   // método principal = NBR (o que o cliente usa, e o menor). Caleffi = 2ª verificação.
   const vasoNBR = vasoComercialAcima(r.nbr.volumeVaso);
@@ -199,16 +230,17 @@ export default function VasoExpansao() {
               label="Pressão da rede (Psist)"
               value={f.pSist}
               onChange={(v) => set("pSist", v)}
-              unit="bar"
-              step={0.1}
+              unit="mca"
+              step={0.5}
+              hint={equivBar(emBar.pSist)}
             />
             <NumberField
               label="Pressão da válvula (Pvalv)"
               value={f.pValv}
               onChange={(v) => set("pValv", v)}
-              unit="bar"
-              step={0.1}
-              hint="Tem que ser maior que Psist"
+              unit="mca"
+              step={0.5}
+              hint={`${equivBar(emBar.pValv)} · tem que ser maior que Psist`}
             />
           </div>
         </Accordion>
@@ -309,7 +341,9 @@ export default function VasoExpansao() {
         <Accordion title="Memória de cálculo NBR 16057">
           <div className="space-y-2 text-sm text-zinc-300">
             <p className="text-[12px] leading-relaxed text-zinc-400">
-              V = (Vol × e) / (1 − ((Psist + 0,3 + 1) / (Pvalv + 1)))
+              V = (Vol × e) / (1 − ((Psist + 0,3 + 1) / (Pvalv + 1))) · pressões em bar,
+              convertidas do mca digitado (1 bar ={" "}
+              {MCA_POR_BAR.toFixed(4).replace(".", ",")} mca, com g = 9,806 m/s²)
             </p>
             <div className="grid grid-cols-2 gap-3">
               <Det l="Coef. e (Tabela A.1)" v={fmtCoef(r.nbr.coef)} />
@@ -319,8 +353,8 @@ export default function VasoExpansao() {
               />
               <Det l="Volume (Vol)" v={`${f.volume} L`} />
               <Det l="Numerador (Vol×e)" v={(f.volume * r.nbr.coef).toFixed(2)} />
-              <Det l="Pressões topo" v={`${(f.pSist + 0.3 + 1).toFixed(2)} bar`} />
-              <Det l="Pressões base" v={`${(f.pValv + 1).toFixed(2)} bar`} />
+              <Det l="Pressões topo" v={fmtBar(emBar.pSist + 0.3 + 1)} />
+              <Det l="Pressões base" v={fmtBar(emBar.pValv + 1)} />
               <Det l="Denominador" v={r.nbr.denominador.toFixed(4)} />
               <Det l="Volume do vaso" v={fmtL(r.nbr.volumeVaso)} />
             </div>
@@ -330,7 +364,8 @@ export default function VasoExpansao() {
         <Accordion title="Memória de cálculo Caleffi">
           <div className="space-y-2 text-sm text-zinc-300">
             <p className="text-[12px] leading-relaxed text-zinc-400">
-              e = (0,31 + 3,9·10⁻⁴ × tm²) / 100 · V = ((e × Vol) + Vv) / (1 − (Pi / Pf))
+              e = (0,31 + 3,9·10⁻⁴ × tm²) / 100 · V = ((e × Vol) + Vv) / (1 − (Pi / Pf)) ·
+              Po, Pi, Per e Pf em bar (pressão absoluta), como na planilha
             </p>
             <div className="grid grid-cols-2 gap-3">
               <Det l="Coef. e (fórmula)" v={fmtCoef(r.caleffi.coef)} />
