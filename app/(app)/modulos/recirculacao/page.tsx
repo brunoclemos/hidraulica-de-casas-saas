@@ -2,8 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { calcular, Inputs, mmss, Cenario } from "@/lib/calc/recirculacao";
+import { calcular, Inputs, mmss, Cenario, Resultado } from "@/lib/calc/recirculacao";
 import { CPVC, ARMAFLEX, AMBIENTES, SOLOS, RAIOS } from "@/lib/calc/tables";
+import {
+  useMemorial,
+  BlocoCampos,
+  BlocoMemorial,
+  DadosMemorial,
+} from "@/lib/memorial";
 import { NumberField, SelectField, Stepper, Accordion } from "@/components/Fields";
 import { PipeFlow } from "@/components/PipeFlow";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
@@ -71,6 +77,245 @@ function toInputs(f: Form, diametro: number, tipo: Inputs["tipo"]): Inputs {
     kSolo: f.kSolo,
     raioSolo: f.raioSolo,
   };
+}
+
+const NORMAS = [
+  "Tabela Caleffi — velocidade máxima recomendada por diâmetro",
+  "Correlação de Dittus-Boelter (Nu = 0,023 · Re^0,8 · Pr^0,3) para a convecção interna",
+  "Condução em parede cilíndrica (lei de Fourier) no tubo CPVC, no isolante e no solo",
+  "Planilhas do curso Hidráulica de Casas — Tempo de Esvaziamento da Recirculação e Análises de Água Quente (abas Shafts e Solos)",
+];
+
+const num = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+const dec = (v: number, casas: number) => v.toFixed(casas).replace(".", ",");
+const rotuloCPVC = (comercial: number) =>
+  CPVC.find((c) => c.comercial === comercial)?.rotulo ?? `${num(comercial)} mm`;
+
+// Memorial de cálculo: lê os dois cenários que a tela já compara (manifold e
+// convencional) e repete os mesmos números, com as mesmas casas decimais.
+function dadosMemorial(
+  f: Form,
+  man: Resultado,
+  conv: Resultado,
+  cliente: string,
+  nome: string,
+): DadosMemorial {
+  const identificacao = {
+    cliente: cliente.trim(),
+    calculo: nome.trim() || "Sem nome",
+    normas: NORMAS,
+  };
+
+  const ambiente = AMBIENTES.find((a) => a.h === f.hExterno);
+  const solo = SOLOS.find((s) => s.k === f.kSolo);
+  const raio = RAIOS.find((x) => x.r === f.raioSolo);
+
+  const entrada: BlocoCampos = {
+    tipo: "campos",
+    titulo: "Dados de entrada",
+    itens: [
+      { label: "Cenário", valor: f.cenario === "ar" ? "Tubo no ar / shaft" : "Tubo enterrado" },
+      { label: "Diâmetro do manifold", valor: rotuloCPVC(f.diametroManifold) },
+      { label: "Diâmetro do convencional", valor: rotuloCPVC(f.diametroConvencional) },
+      { label: "Vazão por ponto", valor: `${num(f.vazao)} L/min` },
+      { label: "Pontos simultâneos", valor: num(f.pontos) },
+      { label: "Distância até o ponto", valor: `${num(f.distancia)} m` },
+      {
+        label: "Isolamento",
+        valor: f.espessura === 0 ? "sem isolante" : `${num(f.espessura)} mm de armaflex`,
+      },
+      { label: "Temperatura do meio externo", valor: `${num(f.tAmbiente)} °C` },
+      { label: "Temperatura da água quente", valor: `${num(f.tFinal)} °C` },
+      { label: "Tempo parado considerado", valor: `${num(f.tempoParado)} min` },
+      { label: "Temperatura mínima aceitável no ponto", valor: `${num(f.tAlvo)} °C` },
+      f.cenario === "ar"
+        ? {
+            label: "Ambiente do tubo",
+            valor: `${ambiente ? `${ambiente.nome} · ` : ""}h externo ${num(f.hExterno)} W/m²·K`,
+          }
+        : {
+            label: "Solo",
+            valor: `${solo ? `${solo.nome} · ` : ""}k ${num(f.kSolo)} W/m·K · raio de influência ${
+              raio ? `${raio.nome} · ` : ""
+            }${num(f.raioSolo)} m`,
+          },
+    ],
+  };
+
+  const bloqueado = (motivo: string): DadosMemorial => ({
+    ...identificacao,
+    blocos: [entrada],
+    impedimento: motivo,
+  });
+
+  const faltando = [
+    f.vazao > 0 ? null : "a vazão por ponto",
+    f.pontos > 0 ? null : "os pontos simultâneos",
+    f.distancia > 0 ? null : "a distância até o ponto",
+  ].filter((x): x is string => x !== null);
+  if (faltando.length > 0) return bloqueado(`Preencha ${faltando.join(", ")} para gerar o memorial.`);
+  if (!(f.tAmbiente < f.tFinal)) {
+    return bloqueado("A água quente precisa estar mais quente que o meio externo.");
+  }
+  if (!(f.tAmbiente < f.tAlvo)) {
+    return bloqueado(
+      "A temperatura mínima aceitável precisa ser maior que a do meio externo — abaixo dela a água nunca chega, o tubo não esfria além do ambiente.",
+    );
+  }
+  if (f.tAlvo > f.tFinal) {
+    return bloqueado("A temperatura mínima aceitável não pode ser maior que a da água quente.");
+  }
+
+  const comparacao: { metrica: string; man: string; conv: string; decide?: boolean }[] = [
+    {
+      metrica: "Diâmetro interno",
+      man: `${num(man.diametroInterno)} mm`,
+      conv: `${num(conv.diametroInterno)} mm`,
+    },
+    {
+      metrica: "Vazão que define a velocidade",
+      man: `${num(f.vazao)} L/min (1 ponto)`,
+      conv: `${num(conv.vazaoTotal)} L/min (total)`,
+    },
+    {
+      metrica: "Velocidade",
+      man: `${dec(man.velocidade, 2)} m/s`,
+      conv: `${dec(conv.velocidade, 2)} m/s`,
+      decide: !man.velocidadeOk || !conv.velocidadeOk,
+    },
+    {
+      metrica: "Velocidade máxima recomendada (Caleffi)",
+      man: `${num(man.velMaxCaleffi)} m/s`,
+      conv: `${num(conv.velMaxCaleffi)} m/s`,
+    },
+    {
+      metrica: "Água quente chega em (mm:ss)",
+      man: mmss(man.tempoChegadaS),
+      conv: mmss(conv.tempoChegadaS),
+    },
+    {
+      metrica: "Água parada no trecho (desperdício por abertura)",
+      man: `${dec(man.volumeL, 1)} L`,
+      conv: `${dec(conv.volumeL, 1)} L`,
+    },
+    {
+      metrica: "Resistência térmica total",
+      man: `${dec(man.rTotal, 4)} K/W`,
+      conv: `${dec(conv.rTotal, 4)} K/W`,
+    },
+    { metrica: "Condutância UA", man: `${dec(man.ua, 2)} W/K`, conv: `${dec(conv.ua, 2)} W/K` },
+    { metrica: "Constante térmica τ", man: `${dec(man.tau, 0)} s`, conv: `${dec(conv.tau, 0)} s` },
+    {
+      metrica: "Perda até o ponto (escoando)",
+      man: `${dec(man.perdaRegime, 2)} °C`,
+      conv: `${dec(conv.perdaRegime, 2)} °C`,
+    },
+    {
+      metrica: "Temperatura na chegada",
+      man: `${dec(man.tFinalReal, 1)} °C`,
+      conv: `${dec(conv.tFinalReal, 1)} °C`,
+      decide: true,
+    },
+    {
+      metrica: `Após ${num(f.tempoParado)} min parada`,
+      man: `${dec(man.tempAposXMin, 1)} °C`,
+      conv: `${dec(conv.tempAposXMin, 1)} °C`,
+      decide: true,
+    },
+    {
+      metrica: `Esfria até ${num(f.tAlvo)} °C em`,
+      man: `${dec(man.tempoAteAlvoMin, 1)} min`,
+      conv: `${dec(conv.tempoAteAlvoMin, 1)} min`,
+    },
+    {
+      metrica: "Perda de calor da água parada",
+      man: `${dec(man.perdaAguaParadaKcal, 0)} kcal`,
+      conv: `${dec(conv.perdaAguaParadaKcal, 0)} kcal`,
+    },
+  ];
+
+  const blocos: BlocoMemorial[] = [
+    entrada,
+    {
+      tipo: "texto",
+      titulo: "Método de cálculo",
+      paragrafos: [
+        "A velocidade sai da vazão sobre a área interna do tubo CPVC. No traçado com manifold cada ramal leva a vazão de um único ponto; no traçado convencional o tronco leva a vazão de todos os pontos simultâneos. A velocidade obtida é comparada com o máximo recomendado pela tabela Caleffi para o diâmetro, e o tempo de chegada da água quente é a distância dividida por essa velocidade.",
+        "A perda térmica com a água escoando é modelada por resistências em série: convecção interna pela correlação de Dittus-Boelter, condução na parede do CPVC e no isolante, e troca com o meio externo — convecção no ar do shaft ou condução no solo até o raio de influência. Da resistência total vem a condutância UA, e a queda em regime é (Tq − Tamb) × [1 − e^(−UA ÷ (ṁ · cp))], o que dá a temperatura real que chega no ponto.",
+        "Com o ponto fechado, a água parada no trecho troca calor com o meio pela mesma resistência total. A capacidade térmica desse volume define a constante de tempo τ = R · V · cp, e a temperatura decai exponencialmente para a temperatura do meio externo — daí a temperatura após o tempo parado informado e o tempo até cair na mínima aceitável. O volume do trecho é também a água jogada fora a cada abertura, antes da água quente chegar.",
+      ],
+    },
+    {
+      tipo: "tabela",
+      titulo: "Manifold × convencional",
+      colunas: [
+        "Métrica",
+        `Manifold ${num(f.diametroManifold)} mm`,
+        `Convencional ${num(f.diametroConvencional)} mm`,
+      ],
+      linhas: comparacao.map((l) => [l.metrica, l.man, l.conv]),
+      realce: comparacao.map((l, i) => (l.decide ? i : -1)).filter((i) => i >= 0),
+      nota: `Trecho de ${num(f.distancia)} m com ${
+        f.espessura === 0 ? "tubo nu" : `${num(f.espessura)} mm de isolante`
+      }. A diferença de velocidade e de tempo de chegada vem da vazão de cálculo: o manifold entrega água quente mais rápido e desperdiça menos água fria a cada abertura.`,
+    },
+    {
+      tipo: "resultado",
+      titulo: "Conclusão",
+      itens: [
+        {
+          label: "Velocidade no manifold",
+          valor: `${dec(man.velocidade, 2)} m/s`,
+          nota: `máximo recomendado (Caleffi) para ${num(f.diametroManifold)} mm: ${num(
+            man.velMaxCaleffi,
+          )} m/s`,
+          alerta: !man.velocidadeOk,
+        },
+        {
+          label: "Velocidade no convencional",
+          valor: `${dec(conv.velocidade, 2)} m/s`,
+          nota: `máximo recomendado (Caleffi) para ${num(f.diametroConvencional)} mm: ${num(
+            conv.velMaxCaleffi,
+          )} m/s`,
+          alerta: !conv.velocidadeOk,
+        },
+        {
+          label: "Temperatura na chegada (manifold)",
+          valor: `${dec(man.tFinalReal, 1)} °C`,
+          nota: `perde ${dec(man.perdaRegime, 2)} °C no trecho de ${num(
+            f.distancia,
+          )} m · convencional: ${dec(conv.tFinalReal, 1)} °C`,
+          alerta: man.tFinalReal < f.tAlvo,
+        },
+        {
+          label: `Temperatura após ${num(f.tempoParado)} min parada (manifold)`,
+          valor: `${dec(man.tempAposXMin, 1)} °C`,
+          nota: `mínima aceitável ${num(f.tAlvo)} °C · convencional: ${dec(
+            conv.tempAposXMin,
+            1,
+          )} °C`,
+          alerta: man.tempAposXMin < f.tAlvo,
+        },
+        {
+          label: `Tempo até cair para ${num(f.tAlvo)} °C (manifold)`,
+          valor: `${dec(man.tempoAteAlvoMin, 1)} min`,
+          nota: `convencional: ${dec(conv.tempoAteAlvoMin, 1)} min`,
+        },
+        {
+          label: "Água quente chega em (manifold)",
+          valor: `${mmss(man.tempoChegadaS)} (mm:ss)`,
+          nota: `convencional: ${mmss(conv.tempoChegadaS)}`,
+        },
+        {
+          label: "Desperdício por abertura (manifold)",
+          valor: `${dec(man.volumeL, 1)} L`,
+          nota: `convencional: ${dec(conv.volumeL, 1)} L`,
+        },
+      ],
+    },
+  ];
+
+  return { ...identificacao, blocos };
 }
 
 export default function Recirculacao() {
@@ -171,6 +416,8 @@ export default function Recirculacao() {
   // --- cálculo ao vivo ---
   const man = useMemo(() => calcular(toInputs(f, f.diametroManifold, "manifold")), [f]);
   const conv = useMemo(() => calcular(toInputs(f, f.diametroConvencional, "convencional")), [f]);
+
+  useMemorial(MODULO, () => dadosMemorial(f, man, conv, cliente, nome));
 
   const opcoesDiam = CPVC.map((c) => ({ value: c.comercial, label: c.rotulo }));
 
