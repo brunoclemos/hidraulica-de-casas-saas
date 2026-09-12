@@ -941,7 +941,14 @@ function dadosMemorial(
   }
 
   blocos.push(
-    { tipo: "grafico", titulo: "Decaimento térmico × tempo", seletor: "#grafico-perfil svg" },
+    {
+      tipo: "grafico",
+      titulo: "Decaimento térmico × tempo",
+      seletor: "#grafico-perfil svg",
+      // mesma fonte das séries do LineChart, então a legenda do papel acompanha os
+      // toggles de apoio: cenário desligado não vira curva nem linha de legenda
+      legenda: cenarios.map((c) => ({ nome: c.nome, cor: c.cor })),
+    },
     {
       tipo: "resultado",
       titulo: "Conclusão",

@@ -485,6 +485,12 @@ export default function RecirculacaoConsumo() {
         tipo: "grafico",
         titulo: "Curva do sistema × curva do circulador",
         seletor: "#grafico-qh svg",
+        // cores idênticas às do components/QHChart.tsx: a legenda do gráfico é HTML,
+        // não vem no SVG rasterizado, e é ela que diz qual curva é qual no papel
+        legenda: [
+          { nome: "Sistema", cor: "#60a5fa" },
+          { nome: bombaSel.nome, cor: "#FABA0D" },
+        ],
       },
       {
         tipo: "resultado",

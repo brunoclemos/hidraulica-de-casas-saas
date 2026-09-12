@@ -4,7 +4,7 @@
 
 import type { BlocoMemorial, DadosMemorial } from "@/lib/memorial";
 import type { Perfil } from "@/lib/perfil";
-import { rasterizarGrafico } from "./rasterizar";
+import { corParaPapel, rasterizarGrafico } from "./rasterizar";
 import { colunaFracionaria, paraWinAnsi, valorDeDocumento } from "./texto";
 import type { BlocoPronto, MemorialPronto } from "./tipos";
 
@@ -85,7 +85,16 @@ export async function prepararMemorial(entrada: {
     // aluno é avisado do que ficou de fora
     try {
       const { dataUrl, proporcao } = await rasterizarGrafico(bloco.seletor, bloco.proporcao);
-      blocos.push({ tipo: "imagem", titulo: textoOpcional(bloco.titulo), dataUrl, proporcao });
+      blocos.push({
+        tipo: "imagem",
+        titulo: textoOpcional(bloco.titulo),
+        dataUrl,
+        proporcao,
+        legenda: (bloco.legenda ?? []).map((serie) => ({
+          nome: paraWinAnsi(serie.nome),
+          cor: corParaPapel(serie.cor),
+        })),
+      });
     } catch (erro) {
       const nome = bloco.titulo ?? "sem título";
       const motivo = erro instanceof Error ? erro.message : String(erro);

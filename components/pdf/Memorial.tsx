@@ -36,8 +36,14 @@ function MarcaFerramenta() {
   );
 }
 
+// O campo do perfil sugere "CREA-RS 123456", então o número costuma chegar já com o
+// prefixo: repetir daria "CREA CREA-SP 123456/D" no cabeçalho e na assinatura.
+function comPrefixoCrea(crea: string): string {
+  return /^crea/i.test(crea.trim()) ? crea.trim() : `CREA ${crea.trim()}`;
+}
+
 function linhasDoEscritorio(perfil: Perfil): string[] {
-  const creaLinha = perfil.crea === "" ? "" : `CREA ${perfil.crea}`;
+  const creaLinha = perfil.crea === "" ? "" : comPrefixoCrea(perfil.crea);
   return [perfil.responsavel, creaLinha, perfil.cidade, perfil.telefone, perfil.contato].filter(
     (l) => l.trim() !== "",
   );
@@ -108,7 +114,8 @@ function Identificacao({ memorial }: { memorial: MemorialPronto }) {
 
 function Assinatura({ perfil, emitidoEm }: { perfil: Perfil; emitidoEm: Date }) {
   const local = perfil.cidade === "" ? "" : `${perfil.cidade}, `;
-  const cargo = perfil.crea === "" ? "Responsável técnico" : `Responsável técnico · CREA ${perfil.crea}`;
+  const cargo =
+    perfil.crea === "" ? "Responsável técnico" : `Responsável técnico · ${comPrefixoCrea(perfil.crea)}`;
   return (
     <View style={s.assinatura} wrap={false}>
       <Text style={s.localData}>{`${local}${DATA_LONGA.format(emitidoEm)}`}</Text>

@@ -47,6 +47,12 @@ export interface BlocoGrafico {
   titulo?: string;
   seletor: string; // CSS selector do <svg> na página
   proporcao?: number; // largura/altura, quando o viewBox não basta
+  // A legenda do gráfico é HTML ao lado do <svg>, então não vem na rasterização: sem
+  // ela o leitor do memorial não sabe qual curva é qual. Cada série entra com a cor
+  // que ela tem NA TELA — o renderer aplica nela a mesma conversão para papel que
+  // aplica no gráfico, para a bolinha sair no tom da curva. Opcional: gráfico de
+  // série única se explica pelo título.
+  legenda?: { nome: string; cor: string }[];
 }
 
 export interface BlocoResultado {

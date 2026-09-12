@@ -12,6 +12,7 @@ export interface BlocoImagem {
   titulo?: string;
   dataUrl: string;
   proporcao: number; // largura/altura
+  legenda: { nome: string; cor: string }[]; // cor já convertida para papel
 }
 
 export type BlocoPronto = Exclude<BlocoMemorial, BlocoGrafico> | BlocoImagem;

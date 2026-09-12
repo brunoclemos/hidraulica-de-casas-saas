@@ -86,45 +86,50 @@ function Tabela({ bloco }: { bloco: BlocoTabela }) {
   const paginavel = bloco.linhas.length > LINHAS_EM_UMA_PAGINA;
   return (
     <View style={s.bloco} wrap={paginavel}>
-      {/* fixed repete o cabeçalho na virada de página. O título vai DENTRO do fixed
-          porque um fixed aninhado em wrap={false} para de repetir — e sem o título
-          aqui ele ficaria órfão no pé da página */}
-      <View fixed={paginavel}>
-        {bloco.titulo ? <Text style={s.tituloBloco}>{bloco.titulo}</Text> : null}
-        <View style={s.tabelaCabecalho}>
-          {bloco.colunas.map((coluna, i) => (
-            <Text
-              key={i}
-              style={[
-                s.tabelaCabecalhoCelula,
-                { width: colunas[i], textAlign: direita[i] ? "right" : "left" },
-              ]}
-            >
-              {coluna}
-            </Text>
-          ))}
+      {/* Cabeçalho e linhas num View próprio, com a nota fora dele: o fixed repete
+          nas páginas ocupadas pelo PAI, então nota que sobrava para a página
+          seguinte arrastava um cabeçalho de tabela sem nenhuma linha embaixo. */}
+      <View>
+        {/* fixed repete o cabeçalho na virada de página. O título vai DENTRO do fixed
+            porque um fixed aninhado em wrap={false} para de repetir — e sem o título
+            aqui ele ficaria órfão no pé da página */}
+        <View fixed={paginavel}>
+          {bloco.titulo ? <Text style={s.tituloBloco}>{bloco.titulo}</Text> : null}
+          <View style={s.tabelaCabecalho}>
+            {bloco.colunas.map((coluna, i) => (
+              <Text
+                key={i}
+                style={[
+                  s.tabelaCabecalhoCelula,
+                  { width: colunas[i], textAlign: direita[i] ? "right" : "left" },
+                ]}
+              >
+                {coluna}
+              </Text>
+            ))}
+          </View>
         </View>
+        {bloco.linhas.map((linha, i) => (
+          <View
+            key={i}
+            wrap={false}
+            style={realcadas.has(i) ? [s.tabelaLinha, s.tabelaLinhaRealce] : s.tabelaLinha}
+          >
+            {bloco.colunas.map((_, j) => (
+              <Text
+                key={j}
+                style={[
+                  s.tabelaCelula,
+                  { width: colunas[j], textAlign: direita[j] ? "right" : "left" },
+                  realcadas.has(i) ? { fontFamily: "Helvetica-Bold", color: PRETO } : {},
+                ]}
+              >
+                {linha[j] ?? ""}
+              </Text>
+            ))}
+          </View>
+        ))}
       </View>
-      {bloco.linhas.map((linha, i) => (
-        <View
-          key={i}
-          wrap={false}
-          style={realcadas.has(i) ? [s.tabelaLinha, s.tabelaLinhaRealce] : s.tabelaLinha}
-        >
-          {bloco.colunas.map((_, j) => (
-            <Text
-              key={j}
-              style={[
-                s.tabelaCelula,
-                { width: colunas[j], textAlign: direita[j] ? "right" : "left" },
-                realcadas.has(i) ? { fontFamily: "Helvetica-Bold", color: PRETO } : {},
-              ]}
-            >
-              {linha[j] ?? ""}
-            </Text>
-          ))}
-        </View>
-      ))}
       {bloco.nota ? <Text style={s.nota}>{bloco.nota}</Text> : null}
     </View>
   );
@@ -172,6 +177,16 @@ function Grafico({ bloco }: { bloco: BlocoImagem }) {
         src={bloco.dataUrl}
         style={[s.grafico, { width: largura, height: largura / bloco.proporcao }]}
       />
+      {bloco.legenda.length > 0 && (
+        <View style={s.legenda}>
+          {bloco.legenda.map((serie, i) => (
+            <View key={i} style={s.legendaItem}>
+              <View style={[s.legendaAmostra, { backgroundColor: serie.cor }]} />
+              <Text style={s.legendaNome}>{serie.nome}</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }

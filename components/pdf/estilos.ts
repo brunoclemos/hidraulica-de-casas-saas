@@ -118,6 +118,10 @@ export const s = StyleSheet.create({
   paragrafo: { fontSize: 9, color: TINTA, lineHeight: 1.45, marginBottom: 4 },
 
   grafico: { alignSelf: "center" },
+  legenda: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", marginTop: 6 },
+  legendaItem: { flexDirection: "row", alignItems: "center", marginRight: 14, marginBottom: 2 },
+  legendaAmostra: { width: 12, height: 3.5, borderRadius: 1.75, marginRight: 4 },
+  legendaNome: { fontSize: 7.5, color: TINTA },
 
   assinatura: { marginTop: 34, alignItems: "center" },
   localData: { fontSize: 9, color: TINTA, marginBottom: 26 },

@@ -684,6 +684,12 @@ export default function PvcCpvcPressao() {
           tipo: "grafico",
           titulo: `Curva Q × H — ${bombaSel.nome} × pressão necessária`,
           seletor: "#memorial-grafico-qh svg",
+          // cores idênticas às do components/QHChart.tsx: a legenda do gráfico é
+          // HTML, não vem no SVG rasterizado, e é ela que diz qual curva é qual
+          legenda: [
+            { nome: "Pressão necessária", cor: "#60a5fa" },
+            { nome: bombaSel.nome, cor: "#FABA0D" },
+          ],
         });
       }
     }

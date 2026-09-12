@@ -109,6 +109,14 @@ function paraPapel(valor: string, propriedade: string): string | null {
   return hslParaHex(h, s, TINTA_CONTEUDO);
 }
 
+/**
+ * Cor de série da tela -> cor de papel, com a mesma regra do gráfico. É o que mantém
+ * a bolinha da legenda no tom exato da curva rasterizada.
+ */
+export function corParaPapel(cor: string): string {
+  return paraPapel(cor, "stroke") ?? "#000000";
+}
+
 function reentintar(original: Element, copia: Element) {
   const computado = window.getComputedStyle(original);
   for (const prop of PROPRIEDADES) {
