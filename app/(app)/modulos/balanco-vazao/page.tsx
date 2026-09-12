@@ -7,6 +7,7 @@ import {
   minSeg,
   normalizarAnel,
   detalharIda,
+  dnInterno,
   Inputs,
   Anel,
   TrechoIda,
@@ -26,6 +27,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { useMemorial, BlocoMemorial } from "@/lib/memorial";
 
 const MODULO = "balanco-vazao";
 
@@ -148,6 +150,211 @@ export default function BalancoVazao() {
 
   const r = useMemo(() => calcular(f), [f]);
   const somaOk = Math.abs(r.soma - f.vazaoTotal) < 0.05;
+
+  useMemorial(MODULO, () => {
+    const aneis = [
+      { rotulo: "Anel 1", anel: normalizarAnel(f.a1), q: r.q1, volume: r.volume1, tempo: r.tempo1Seg },
+      { rotulo: "Anel 2", anel: normalizarAnel(f.a2), q: r.q2, volume: r.volume2, tempo: r.tempo2Seg },
+    ];
+    const dnRotulo = (material: Material, dn: number) =>
+      DN_TABELA[material].find((d) => d.externo === dn)?.rotulo ?? "—";
+    const fonteRotulo = (t: TrechoIda) =>
+      opcoesFonte.find((o) => o.value === (t.fonteVazao ?? (t.vazao != null ? "manual" : "braco")))
+        ?.label ?? "—";
+
+    // A ida de cada anel já sai detalhada trecho a trecho pelo motor (mesma função da tela).
+    const idas = aneis.map((a) => detalharIda(a.anel, a.q, f.vazaoTotal));
+
+    const faltas: string[] = [];
+    if (!Number.isFinite(f.temperatura)) faltas.push("temperatura da água");
+    if (!(f.vazaoTotal > 0)) faltas.push("vazão total do tronco");
+    if (!(f.tempoAlvoAnel2 > 0)) faltas.push("tempo máximo no Anel 2");
+    aneis.forEach(({ rotulo, anel }, i) => {
+      if (!(anel.comprimentoTotal > 0)) faltas.push(`${rotulo}: comprimento de ida e volta`);
+      if (!(anel.rugosidade >= 0)) faltas.push(`${rotulo}: rugosidade`);
+      anel.trechosIda.forEach((t, j) => {
+        const nomeTrecho = `${rotulo}, trecho ${String(j + 1).padStart(2, "0")}`;
+        if (!(t.comprimento > 0)) faltas.push(`${nomeTrecho}: comprimento`);
+        if (!(idas[i][j].vazaoUsada > 0)) faltas.push(`${nomeTrecho}: vazão`);
+        if (!(idas[i][j].dnInterno > 0)) faltas.push(`${nomeTrecho}: DN`);
+      });
+    });
+
+    const linhasIda = aneis.flatMap(({ rotulo, anel }, i) =>
+      anel.trechosIda.map((t, j) => ({
+        anel: rotulo,
+        trecho: `Trecho ${String(j + 1).padStart(2, "0")}`,
+        material: anel.material,
+        dnExterno: t.dnExterno,
+        fonte: fonteRotulo(t),
+        comprimento: t.comprimento,
+        detalhe: idas[i][j],
+      }))
+    );
+    const maisLentoIda = linhasIda.reduce(
+      (mx, l, i) => (l.detalhe.tempoSeg > linhasIda[mx].detalhe.tempoSeg ? i : mx),
+      0
+    );
+    const anelMaisLento = r.tempo2Seg > r.tempo1Seg ? 1 : 0;
+    const velMax = Math.max(...linhasIda.map((l) => l.detalhe.velocidade));
+    const alvoSeg = f.tempoAlvoAnel2 * 60;
+
+    const blocos: BlocoMemorial[] = [
+      {
+        tipo: "campos",
+        titulo: "Dados de entrada",
+        itens: [
+          { label: "Temperatura da água", valor: `${num(f.temperatura, 0)} °C` },
+          { label: "Vazão total do tronco", valor: `${num(f.vazaoTotal)} L/min` },
+          { label: "Tempo máximo desejado no Anel 2", valor: `${num(f.tempoAlvoAnel2)} min` },
+          ...aneis.flatMap(({ rotulo, anel }) => [
+            {
+              label: `${rotulo} — material e DN`,
+              valor: `${anel.material} · ${dnRotulo(anel.material, anel.dnExterno)}`,
+            },
+            {
+              label: `${rotulo} — comprimento de ida e volta`,
+              valor: `${num(anel.comprimentoTotal)} m (real + equivalente)`,
+            },
+            { label: `${rotulo} — rugosidade`, valor: `${num(anel.rugosidade, 3)} mm` },
+          ]),
+        ],
+      },
+      {
+        tipo: "texto",
+        titulo: "Método de cálculo",
+        paragrafos: [
+          "Os dois anéis saem do mesmo tronco e retornam ao mesmo ponto, então a perda de carga nos dois é igual — e é essa igualdade que reparte a vazão. Com a perda de carga de Darcy-Weisbach igualada nos dois ramos, a vazão de cada anel fica proporcional a K = D^2,5 / √(f · L). Como o fator de atrito depende da própria vazão através do número de Reynolds, a divisão é resolvida por iteração de ponto fixo até a vazão do Anel 1 estabilizar; o atrito vem de Swamee-Jain e a viscosidade da temperatura informada.",
+          "O tempo de recirculação de cada anel é o volume interno do caminho de ida dividido pela vazão que corre nele. A ida é somada trecho a trecho porque o diâmetro muda ao longo do caminho, e cada trecho carrega a sua própria vazão: a do tronco antes da derivação, a do braço do anel depois dela, ou um valor medido em campo.",
+          "O modo inverso parte do tempo máximo admitido no Anel 2: a vazão que percorre o volume da ida nesse tempo define a perda de carga do anel, e essa mesma perda de carga determina a vazão do Anel 1. A soma das duas é a vazão que o circulador precisa entregar no tronco.",
+        ],
+      },
+      {
+        tipo: "tabela",
+        titulo: "Divisão da vazão entre os anéis",
+        colunas: [
+          "Anel",
+          "Material / DN",
+          "DN int. (mm)",
+          "Compr. ida e volta (m)",
+          "Rugosidade (mm)",
+          "Vazão (L/min)",
+          "Volume da ida (L)",
+          "Tempo de recirculação",
+        ],
+        linhas: aneis.map(({ rotulo, anel, q, volume, tempo }) => [
+          rotulo,
+          `${anel.material} · ${dnRotulo(anel.material, anel.dnExterno)}`,
+          num(dnInterno(anel.material, anel.dnExterno), 1),
+          num(anel.comprimentoTotal),
+          num(anel.rugosidade, 3),
+          num(q),
+          num(volume),
+          minSeg(tempo),
+        ]),
+        realce: [anelMaisLento],
+        nota: `Linha realçada: ${aneis[anelMaisLento].rotulo} é o anel mais lento e comanda o dimensionamento. Verificação: soma dos anéis = ${num(
+          r.soma
+        )} L/min ${somaOk ? "(confere com a vazão total do tronco)" : `(diferente dos ${num(f.vazaoTotal)} L/min informados)`}.`,
+      },
+      {
+        tipo: "tabela",
+        titulo: "Caminho de ida — trecho a trecho",
+        colunas: [
+          "Anel",
+          "Trecho",
+          "DN int. (mm)",
+          "Compr. (m)",
+          "Vazão (L/min)",
+          "Origem da vazão",
+          "Velocidade (m/s)",
+          "Volume (L)",
+          "Tempo",
+        ],
+        linhas: linhasIda.map((l) => [
+          l.anel,
+          l.trecho,
+          num(l.detalhe.dnInterno, 1),
+          num(l.comprimento),
+          num(l.detalhe.vazaoUsada),
+          l.fonte,
+          num(l.detalhe.velocidade),
+          num(l.detalhe.volume),
+          minSeg(l.detalhe.tempoSeg),
+        ]),
+        realce: [maisLentoIda],
+        nota: `Linha realçada: trecho que mais pesa no tempo de recirculação (${minSeg(
+          linhasIda[maisLentoIda].detalhe.tempoSeg
+        )}). A origem da vazão é a do projeto: "Tronco" usa a vazão total, "Braço" a vazão calculada do próprio anel e "Manual" o valor informado no trecho.`,
+      },
+      {
+        tipo: "tabela",
+        titulo: "Modo inverso — vazão para o tempo máximo no Anel 2",
+        colunas: ["Grandeza", "Valor"],
+        linhas: [
+          ["Tempo máximo desejado no Anel 2", `${num(f.tempoAlvoAnel2)} min`],
+          ["Vazão necessária no Anel 1", `${num(r.q1Nec)} L/min`],
+          ["Vazão necessária no Anel 2", `${num(r.q2Nec)} L/min`],
+          ["Vazão total necessária no tronco", `${num(r.qTotalNec)} L/min`],
+          ["Vazão total informada no tronco", `${num(f.vazaoTotal)} L/min`],
+        ],
+        realce: [3],
+        nota: "As vazões necessárias mantêm os dois anéis com a mesma perda de carga: é a condição física do paralelo, não uma escolha de projeto. O tempo-alvo é aplicado a todo o volume da ida percorrido na vazão do anel — por isso este resultado não se compara linha a linha com a tabela de trechos, onde cada trecho corre na sua própria vazão.",
+      },
+      {
+        tipo: "resultado",
+        titulo: "Conclusão",
+        itens: [
+          { label: "Vazão no Anel 1", valor: `${num(r.q1)} L/min`, nota: `Volume da ida ${num(r.volume1)} L` },
+          { label: "Vazão no Anel 2", valor: `${num(r.q2)} L/min`, nota: `Volume da ida ${num(r.volume2)} L` },
+          { label: "Tempo de recirculação — Anel 1", valor: minSeg(r.tempo1Seg) },
+          {
+            label: "Tempo de recirculação — Anel 2",
+            valor: minSeg(r.tempo2Seg),
+            nota: `Tempo máximo desejado: ${num(f.tempoAlvoAnel2)} min · vazão total necessária ${num(
+              r.qTotalNec
+            )} L/min`,
+            alerta: r.tempo2Seg > alvoSeg,
+          },
+          {
+            label: "Verificação da divisão",
+            valor: `${num(r.soma)} L/min`,
+            nota: somaOk
+              ? "Soma dos anéis confere com a vazão total do tronco"
+              : `Soma dos anéis diferente dos ${num(f.vazaoTotal)} L/min informados`,
+            alerta: !somaOk,
+          },
+          {
+            label: "Velocidade máxima na ida",
+            valor: `${num(velMax)} m/s`,
+            nota:
+              velMax > 3
+                ? "Acima do limite de 3,0 m/s da NBR 5626 — reveja o DN do trecho"
+                : "Dentro do limite de 3,0 m/s da NBR 5626",
+            alerta: velMax > 3,
+          },
+        ],
+      },
+    ];
+
+    return {
+      cliente: cliente.trim(),
+      calculo: nome.trim() || "Sem nome",
+      normas: [
+        "ABNT NBR 5626:2020 — sistemas prediais de água fria e água quente",
+        "Darcy-Weisbach — perda de carga distribuída",
+        "Swamee-Jain — fator de atrito (aproximação explícita de Colebrook-White)",
+        "Perda de carga igual em ramos em paralelo — divisão de vazão por iteração",
+        "Viscosidade dinâmica da água por temperatura — tabela da planilha de referência",
+        "Diâmetros internos CPVC e PVC por DN comercial — tabela da planilha de referência",
+      ],
+      blocos,
+      impedimento: faltas.length
+        ? `Complete o dimensionamento antes de emitir o memorial — ${faltas.join("; ")}.`
+        : undefined,
+    };
+  });
+
 
   return (
     <div className="space-y-5">
