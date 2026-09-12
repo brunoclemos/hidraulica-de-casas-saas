@@ -24,6 +24,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { useMemorial } from "@/lib/memorial";
 
 const MODULO = "vaso-expansao";
 
@@ -77,6 +78,13 @@ const fmtCoef = (v: number) => v.toFixed(5);
 // Quem confere com a planilha e com o catálogo da válvula pensa em bar.
 const equivBar = (bar: number) =>
   isFinite(bar) ? `≈ ${bar.toFixed(2).replace(".", ",")} bar` : "—";
+
+// Memorial em PDF: mesmas casas decimais da tela, vírgula decimal e unidade junto.
+const memo = (v: number, casas: number, unidade?: string) =>
+  Number.isFinite(v)
+    ? `${v.toFixed(casas).replace(".", ",")}${unidade ? ` ${unidade}` : ""}`
+    : "—";
+const comoDigitado = (v: number) => String(v).replace(".", ",");
 
 export default function VasoExpansao() {
   const [f, setF] = useState<Form>(PADRAO);
@@ -190,6 +198,136 @@ export default function VasoExpansao() {
   }));
 
   const denominadorRuim = !r.pressaoValida;
+
+  // O memorial só descreve o que já está calculado. A entrada é em mca e o motor
+  // trabalha em bar absoluto: cada pressão sai com a sua unidade explícita para o
+  // documento não misturar as duas escalas.
+  useMemorial(MODULO, () => {
+    const faltando = [
+      !Number.isFinite(f.volume) || f.volume <= 0 ? "o volume de água do sistema" : "",
+      !Number.isFinite(f.pSist) ? "a pressão da rede (Psist)" : "",
+      !Number.isFinite(f.pValv) ? "a pressão da válvula (Pvalv)" : "",
+    ].filter(Boolean);
+
+    return {
+      cliente,
+      calculo: nome,
+      normas: [
+        "ABNT NBR 16057 — volume do vaso de expansão e coeficiente de dilatação da Tabela A.1",
+        "Tabela Caleffi — segunda verificação do volume (coeficiente por fórmula e folga de 0,5% do volume)",
+      ],
+      impedimento: faltando.length
+        ? `Preencha ${faltando.join(", ")} antes de gerar o memorial.`
+        : denominadorRuim
+          ? "Pressões incompatíveis: a pressão da válvula de segurança (Pvalv) tem que ser maior que a pressão da rede (Psist). Com Pvalv menor ou igual a Psist o denominador do cálculo fica zero ou negativo e o vaso não tem volume útil."
+          : undefined,
+      blocos: [
+        {
+          tipo: "campos",
+          titulo: "Dados de entrada",
+          itens: [
+            { label: "Temperatura do boiler", valor: `${f.tempBoiler} °C` },
+            { label: "Volume de água do sistema", valor: `${comoDigitado(f.volume)} L` },
+            {
+              label: "Pressão da rede (Psist)",
+              valor: `${comoDigitado(f.pSist)} mca (${equivBar(emBar.pSist)})`,
+            },
+            {
+              label: "Pressão da válvula de segurança (Pvalv)",
+              valor: `${comoDigitado(f.pValv)} mca (${equivBar(emBar.pValv)})`,
+            },
+          ],
+        },
+        {
+          tipo: "texto",
+          titulo: "Método de cálculo",
+          paragrafos: [
+            "A NBR 16057 dimensiona o vaso pelo volume de água do sistema e pelo coeficiente de dilatação e da Tabela A.1 na temperatura de operação do boiler: V = (Vol × e) / (1 − ((Psist + 0,3 + 1) / (Pvalv + 1))). As pressões entram em bar absoluto — a parcela de 1 bar é a atmosférica e os 0,3 bar são a pré-carga acima da pressão da rede.",
+            `O formulário recebe as pressões em metros de coluna d'água e a conversão para bar acontece na fronteira do cálculo, com 1 bar = ${MCA_POR_BAR.toFixed(4).replace(".", ",")} mca (ρ = 1000 kg/m³, g = 9,806 m/s²). Neste memorial as pressões informadas aparecem em mca e as pressões usadas nas fórmulas, em bar.`,
+            "O método Caleffi entra como segunda verificação: calcula e por fórmula, soma uma folga Vv de 0,5% do volume e desconta 0,5 bar da regulagem da válvula, o que resulta num volume mais conservador. A especificação segue a NBR 16057; o Caleffi confere a ordem de grandeza.",
+          ],
+        },
+        {
+          tipo: "tabela",
+          titulo: "Memorial de cálculo — NBR 16057",
+          colunas: ["Parâmetro", "Valor"],
+          linhas: [
+            ["Coeficiente de dilatação e (Tabela A.1)", memo(r.nbr.coef, 5)],
+            ["Origem do coeficiente", coefInfo.interpolado ? "interpolado" : "exato (tabela)"],
+            ["Volume de água do sistema (Vol)", `${comoDigitado(f.volume)} L`],
+            ["Numerador (Vol × e)", memo(f.volume * r.nbr.coef, 2, "L")],
+            ["Pressões no topo (Psist + 0,3 + 1)", memo(emBar.pSist + 0.3 + 1, 2, "bar")],
+            ["Pressões na base (Pvalv + 1)", memo(emBar.pValv + 1, 2, "bar")],
+            ["Denominador", memo(r.nbr.denominador, 4)],
+            ["Volume mínimo do vaso", memo(r.nbr.volumeVaso, 1, "L")],
+          ],
+          nota: "V = (Vol × e) / (1 − ((Psist + 0,3 + 1) / (Pvalv + 1))), com as pressões em bar absoluto convertidas do mca informado.",
+        },
+        {
+          tipo: "tabela",
+          titulo: "Memorial de cálculo — Caleffi (2ª verificação)",
+          colunas: ["Parâmetro", "Valor"],
+          linhas: [
+            ["Coeficiente de dilatação e (fórmula)", memo(r.caleffi.coef, 5)],
+            ["tm (temperatura do boiler)", `${f.tempBoiler} °C`],
+            ["Vv (folga de 0,5% do volume)", memo(r.caleffi.vv, 1, "L")],
+            ["Po (pré-carga = Psist + 0,3)", memo(r.caleffi.po, 2, "bar")],
+            ["Pi (inicial absoluta = Po + 1)", memo(r.caleffi.pi, 2, "bar")],
+            ["Per (máx. de funcionamento = Pvalv − 0,5)", memo(r.caleffi.per, 2, "bar")],
+            ["Pf (final absoluta = Per + 1)", memo(r.caleffi.pf, 2, "bar")],
+            ["Denominador", memo(r.caleffi.denominador, 4)],
+            ["Volume do vaso", memo(r.caleffi.volumeVaso, 1, "L")],
+          ],
+          nota: "e = (0,31 + 3,9·10⁻⁴ × tm²) / 100 · V = ((e × Vol) + Vv) / (1 − (Pi / Pf)), com Po, Pi, Per e Pf em bar (pressão absoluta).",
+        },
+        {
+          tipo: "tabela",
+          titulo: "Comparativo dos dois métodos",
+          colunas: ["Métrica", "NBR 16057 (principal)", "Caleffi (2ª verificação)"],
+          linhas: [
+            ["Volume do vaso", memo(r.nbr.volumeVaso, 1, "L"), memo(r.caleffi.volumeVaso, 1, "L")],
+            ["Coeficiente de dilatação (e)", memo(r.nbr.coef, 5), memo(r.caleffi.coef, 5)],
+            ["Folga de 0,5% do volume (Vv)", "—", memo(r.caleffi.vv, 1, "L")],
+          ],
+          realce: [0],
+          nota: "A NBR 16057 é o método de especificação. O Caleffi usa coeficiente por fórmula, soma a folga de 0,5% do volume e desconta 0,5 bar da válvula, então costuma resultar num volume maior.",
+        },
+        {
+          tipo: "resultado",
+          titulo: "Conclusão",
+          itens: [
+            {
+              label: "Volume mínimo do vaso (NBR 16057)",
+              valor: memo(r.nbr.volumeVaso, 1, "L"),
+            },
+            {
+              label: "Vaso comercial recomendado",
+              valor:
+                vasoNBR !== null
+                  ? `${vasoNBR} L`
+                  : Number.isFinite(r.nbr.volumeVaso)
+                    ? "acima de 200 L (consultar fabricante)"
+                    : "—",
+              nota: "Menor vaso de catálogo (8 / 12 / 18 / 24 / 50 / 100 / 200 L) que cobre o volume mínimo da NBR.",
+              alerta: vasoNBR === null,
+            },
+            {
+              label: "Volume pelo método Caleffi (2ª verificação)",
+              valor: memo(r.caleffi.volumeVaso, 1, "L"),
+              nota: "Valor de conferência, mais conservador; a especificação é pela NBR 16057.",
+            },
+            {
+              label: "Coeficiente de dilatação adotado (e)",
+              valor: memo(r.nbr.coef, 5),
+              nota: coefInfo.interpolado
+                ? "interpolado entre dois pontos da Tabela A.1"
+                : "valor exato da Tabela A.1",
+            },
+          ],
+        },
+      ],
+    };
+  });
 
   return (
     <div className="space-y-5">
