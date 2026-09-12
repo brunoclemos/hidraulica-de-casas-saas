@@ -16,7 +16,15 @@ import {
   TAMANHOS_BOILER_COMERCIAIS,
   pontosPadrao,
   eletrosPadrao,
+  ItemResultado,
+  Resultado,
 } from "@/lib/calc/caixa-boiler-solar";
+import {
+  useMemorial,
+  BlocoCampos,
+  BlocoMemorial,
+  DadosMemorial,
+} from "@/lib/memorial";
 import {
   MARCAS_COLETOR,
   modelosDaMarca,
@@ -93,6 +101,14 @@ function toInputs(f: Form): Inputs {
 
 const fmt = (n: number, d = 0) =>
   n.toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// valor de entrada como o campo mostra (sem forçar casas decimais)
+const num = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+
+const NORMAS = [
+  "Tabela PBE/INMETRO de coletores solares — produção média mensal (kWh/mês) e classificação energética",
+  "Planilha do curso Hidráulica de Casas — Dimensionamento Caixa d'Água, Boiler e Coletores Solares",
+];
 
 const TIPO_OPCOES: { value: TipoPonto; label: string }[] = [
   { value: "AF", label: "Só fria (AF)" },
@@ -233,6 +249,8 @@ export default function CaixaBoilerSolar() {
       ? TAMANHOS_BOILER_COMERCIAIS.slice(Math.max(0, idx - 1), idx + 5)
       : TAMANHOS_BOILER_COMERCIAIS.slice(6, 12);
   }, [r.volBoilerSugerido]);
+
+  useMemorial(MODULO, () => dadosMemorial(f, r, cliente, nome));
 
   return (
     <div className="space-y-5">
@@ -666,6 +684,192 @@ export default function CaixaBoilerSolar() {
       </div>
     </div>
   );
+}
+
+// Memorial de cálculo: lê o resultado que já está na tela e repete os mesmos
+// números, com as mesmas casas decimais.
+function dadosMemorial(f: Form, r: Resultado, cliente: string, nome: string): DadosMemorial {
+  const coletor = f.modeloColetor ? acharColetor(f.marcaColetor, f.modeloColetor) : undefined;
+  const identificacao = {
+    cliente: cliente.trim(),
+    calculo: nome.trim() || "Sem nome",
+    normas: NORMAS,
+  };
+
+  const entrada: BlocoCampos = {
+    tipo: "campos",
+    titulo: "Dados de entrada",
+    itens: [
+      { label: "Nº de usuários", valor: num(f.nUsuarios) },
+      { label: "Temperatura da água quente (boiler)", valor: `${num(f.tQuente)} °C` },
+      { label: "Temperatura da água fria (local)", valor: `${num(f.tFria)} °C` },
+      { label: "Temperatura de consumo desejada", valor: `${num(f.tConsumo)} °C` },
+      {
+        label: "Coletor solar",
+        valor: coletor
+          ? `${coletor.marca} ${coletor.modelo} · classe ${coletor.classificacao} · ${fmt(
+              coletor.eficiencia,
+              1,
+            )} % de eficiência · ${fmt(coletor.area, 1)} m²`
+          : "produção informada manualmente (fora do seletor PBE/INMETRO)",
+      },
+      { label: "Produção do coletor (PBE/INMETRO)", valor: `${num(f.producaoColetor)} kWh/mês` },
+      { label: "Clima da região", valor: CLIMA_LABEL[f.clima] },
+      { label: "Orientação do telhado", valor: ORIENTACAO_LABEL[f.orientacao] },
+      {
+        label: "Volume do boiler",
+        valor: r.usouEscolhido
+          ? `${fmt(f.volumeBoilerEscolhido, 0)} L (tamanho comercial arbitrado)`
+          : "não arbitrado — segue o volume calculado",
+      },
+    ],
+  };
+
+  const bloqueado = (motivo: string): DadosMemorial => ({
+    ...identificacao,
+    blocos: [entrada],
+    impedimento: motivo,
+  });
+
+  if (!r.tempOk && r.tempMsg) return bloqueado(r.tempMsg);
+  if (f.nUsuarios <= 0) return bloqueado("Informe o nº de usuários para gerar o memorial.");
+  if (r.consumoTotal <= 0) {
+    return bloqueado(
+      "Nenhum ponto de consumo com volume: revise tempo de uso, vazão e frequência dos pontos.",
+    );
+  }
+  if (r.consumoAQ <= 0) {
+    return bloqueado(
+      "Nenhum ponto marcado como AF e AQ: sem consumo de água quente não há boiler nem coletor a dimensionar.",
+    );
+  }
+  if (f.producaoColetor <= 0) {
+    return bloqueado(
+      "Informe a produção do coletor (kWh/mês) ou escolha um modelo na tabela PBE/INMETRO.",
+    );
+  }
+
+  const conta = (it: ItemResultado): string => {
+    const ponto = f.pontos.find((p) => p.id === it.id);
+    if (ponto) {
+      return `${num(f.nUsuarios)} usuários × ${num(ponto.tempo)} min × ${num(
+        ponto.vazao,
+      )} L/min × ${num(ponto.frequencia)}/dia`;
+    }
+    const eletro = f.eletros.find((e) => e.id === it.id);
+    if (eletro?.tem) return `${num(eletro.volume)} L × ${num(Math.max(1, eletro.frequencia))}/dia`;
+    return "sem uso";
+  };
+
+  const consumo = r.itens.map((it) => [it.nome, it.tipo, conta(it), fmt(it.volume, 0)]);
+  const linhasConsumo = [
+    ...consumo,
+    ["Consumo total", "AF + AQ", "soma de todos os pontos", fmt(r.consumoTotal, 0)],
+    ["Consumo de água quente", "AF e AQ", "soma só dos pontos com água quente", fmt(r.consumoAQ, 0)],
+  ];
+
+  const dimensionamento = [
+    ["Consumo dos pontos com água quente", `${fmt(r.consumoAQ, 0)} L/dia`],
+    [
+      `Fração de mistura (${num(f.tConsumo)} − ${num(f.tFria)}) ÷ (${num(f.tQuente)} − ${num(
+        f.tFria,
+      )})`,
+      `${fmt(r.pctMisturaAQ, 1)} %`,
+    ],
+    ["Volume de água quente no boiler (calculado)", `${fmt(r.volBoilerQuente, 2)} L`],
+    ["Volume de água fria (consumo total − água quente)", `${fmt(r.volFria, 2)} L`],
+    [
+      "Volume de boiler adotado",
+      `${fmt(r.volBoilerUsado, 0)} L (${r.usouEscolhido ? "escolhido" : "calculado"})`,
+    ],
+    [
+      `Energia útil diária = ${fmt(r.volBoilerUsado, 0)} L × (${num(f.tQuente)} − ${num(
+        f.tFria,
+      )}) ÷ ${fmt(CONST_ENERGIA_UTIL, 1)}`,
+      `${fmt(r.energiaUtil, 0)} kWh`,
+    ],
+    [
+      `Coletores = energia ÷ ${num(f.producaoColetor)} kWh/mês × fator clima ${fmt(r.fatorClima, 2)}`,
+      `${fmt(r.nColetoresExato, 2)} → ${r.nColetoresBruto}`,
+    ],
+    [
+      `Coletores corrigidos × fator orientação ${fmt(r.fatorOrientacao, 2)}`,
+      `${fmt(r.nCorrigidoExato, 2)} → ${r.nColetoresCorrigido}`,
+    ],
+  ];
+
+  const boilerAbaixo = r.usouEscolhido && r.volBoilerUsado < r.volBoilerQuente;
+
+  const blocos: BlocoMemorial[] = [
+    entrada,
+    {
+      tipo: "texto",
+      titulo: "Método de cálculo",
+      paragrafos: [
+        "O consumo diário sai ponto a ponto: nº de usuários × tempo de uso × vazão × frequência. Aparelhos de volume fixo entram pelo volume por uso multiplicado pela frequência. Só os pontos marcados como AF e AQ entram no consumo de água quente; os demais são atendidos direto pela água fria.",
+        "O boiler armazena apenas a parcela quente da mistura: a fração (Tc − Tf) ÷ (Tq − Tf) converte o consumo na temperatura de consumo para volume na temperatura do boiler, e o complemento é a água fria da caixa. Como boiler é produto de tamanho fechado, o projetista arbitra o volume comercial — e é esse volume adotado que segue para o dimensionamento dos coletores.",
+        "A energia útil diária é o volume adotado multiplicado pelo salto de temperatura e dividido pela constante 28,7 da planilha do curso. Dividida pela produção média mensal do coletor etiquetado no PBE/INMETRO e corrigida pelo fator de clima, resulta no nº de coletores, arredondado para cima; esse número é corrigido pela orientação do telhado e arredondado para cima outra vez.",
+      ],
+    },
+    {
+      tipo: "tabela",
+      titulo: "Consumo diário por ponto",
+      colunas: ["Ponto", "Tipo", "Cálculo", "Volume (L/dia)"],
+      linhas: linhasConsumo,
+      realce: [consumo.length, consumo.length + 1],
+      nota: "AF = só água fria; AF e AQ = ponto que também consome água quente (é o que dimensiona o boiler).",
+    },
+    {
+      tipo: "tabela",
+      titulo: "Do consumo ao número de coletores",
+      colunas: ["Etapa", "Valor"],
+      linhas: dimensionamento,
+      realce: [dimensionamento.length - 1],
+      nota: `Arredondamento para cima (ROUNDUP) nas duas etapas de coletores, como na planilha do curso. ${fmt(
+        CONST_ENERGIA_UTIL,
+        1,
+      )} é a constante da energia útil diária. É o volume do boiler que dimensiona as placas: trocar o tamanho adotado muda o nº de coletores.`,
+    },
+    {
+      tipo: "resultado",
+      titulo: "Conclusão",
+      itens: [
+        {
+          label: "Volume de boiler a adotar",
+          valor: `${fmt(r.volBoilerUsado, 0)} L`,
+          nota: boilerAbaixo
+            ? `abaixo do volume calculado (${fmt(
+                r.volBoilerQuente,
+                0,
+              )} L): o boiler não cobre o consumo de água quente do dia`
+            : r.usouEscolhido
+              ? `tamanho comercial escolhido · calculado ${fmt(r.volBoilerQuente, 0)} L`
+              : `valor calculado (exato ${fmt(
+                  r.volBoilerQuente,
+                  1,
+                )} L) · menor tamanho comercial acima: ${fmt(r.volBoilerSugerido, 0)} L`,
+          alerta: boilerAbaixo,
+        },
+        {
+          label: "Coletores solares a instalar",
+          valor: `${r.nColetoresCorrigido}`,
+          nota: `exato ${fmt(r.nCorrigidoExato, 2)} antes do arredondamento · a partir do volume ${
+            r.usouEscolhido ? "escolhido" : "calculado"
+          } (${fmt(r.volBoilerUsado, 0)} L)`,
+        },
+        { label: "Consumo total por dia", valor: `${fmt(r.consumoTotal, 0)} L` },
+        { label: "Volume de água fria", valor: `${fmt(r.volFria, 0)} L` },
+        {
+          label: "Água quente na mistura",
+          valor: `${fmt(r.pctMisturaAQ, 1)} %`,
+          nota: `água fria na mistura: ${fmt(100 - r.pctMisturaAQ, 1)} %`,
+        },
+        { label: "Energia útil diária", valor: `${fmt(r.energiaUtil, 0)} kWh` },
+      ],
+    },
+  ];
+
+  return { ...identificacao, blocos };
 }
 
 function Hero({ titulo, valor, sub }: { titulo: string; valor: string; sub?: string }) {
