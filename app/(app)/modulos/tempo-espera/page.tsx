@@ -15,6 +15,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { useMemorial, BlocoMemorial } from "@/lib/memorial";
 
 const MODULO = "tempo-espera";
 
@@ -82,6 +83,127 @@ export default function TempoEspera() {
   function novo() { setF(PADRAO); setProjetoId(null); setCliente(""); setNome(""); snapshot.current = ""; setSalvoEm(null); setEstado("nao-salvo"); }
 
   const r = useMemo(() => calcular(f.trechos), [f]);
+
+  useMemorial(MODULO, () => {
+    const rotulo = (i: number) =>
+      f.trechos[i].nome.trim() || `Trecho ${String(i + 1).padStart(2, "0")}`;
+    const dnRotulo = (dn: number) => opcoesDN.find((o) => o.value === dn)?.label ?? "—";
+
+    const faltas = f.trechos.flatMap((t, i) => {
+      const pendencias: string[] = [];
+      if (!(t.vazao > 0)) pendencias.push("vazão");
+      if (!(t.distancia > 0)) pendencias.push("distância");
+      if (!(r.trechos[i].dnInterno > 0)) pendencias.push("DN");
+      return pendencias.length ? [`${rotulo(i)}: ${pendencias.join(", ")}`] : [];
+    });
+
+    const maisLento = r.trechos.reduce(
+      (mx, t, i) => (t.tempoSeg > r.trechos[mx].tempoSeg ? i : mx),
+      0
+    );
+    const velMax = Math.max(...r.trechos.map((t) => t.velocidade));
+    const pontosSimultaneos = f.trechos.some((t) => t.pontos > 1);
+
+    const blocos: BlocoMemorial[] = [
+      {
+        tipo: "campos",
+        titulo: "Dados de entrada",
+        itens: [
+          { label: "Trechos em série", valor: num(f.trechos.length, 0) },
+          ...f.trechos.map((t, i) => ({
+            label: rotulo(i),
+            valor: `${num(t.vazao)} L/min · ${num(t.pontos, 0)} ponto(s) · ${dnRotulo(
+              t.dnExterno
+            )} · ${num(t.distancia)} m`,
+          })),
+        ],
+      },
+      {
+        tipo: "texto",
+        titulo: "Método de cálculo",
+        paragrafos: [
+          "O tempo de espera é o tempo de trânsito da água quente do aquecedor até o ponto de utilização. Em cada trecho a velocidade sai da equação da continuidade (V = Q/A, com A calculada sobre o diâmetro interno do CPVC) e o tempo do trecho é a distância dividida pela velocidade. Os trechos estão em série: a água percorre um depois do outro, e o tempo total é a soma dos tempos.",
+          "O volume interno de cada trecho (A × L) é a água fria que sai pelo ponto antes de a quente chegar — o desperdício por abertura. É esse número que justifica recircular, aproximar o aquecedor ou reduzir o diâmetro do ramal.",
+          "A NBR 5626 não fixa tempo máximo de espera; o critério é de conforto e de desperdício. O limite normativo verificado aqui é o de velocidade, 3,0 m/s. Área e velocidade usam π = 3,14, como nas fórmulas da planilha de referência do curso — é o que mantém este memorial idêntico a ela célula a célula.",
+        ],
+      },
+      {
+        tipo: "tabela",
+        titulo: "Memorial — trecho a trecho",
+        colunas: [
+          "Trecho",
+          "Vazão (L/min)",
+          "DN",
+          "DN int. (mm)",
+          "Distância (m)",
+          "Velocidade (m/s)",
+          "Volume (L)",
+          "Tempo",
+        ],
+        linhas: r.trechos.map((tr, i) => [
+          rotulo(i),
+          num(f.trechos[i].vazao),
+          dnRotulo(f.trechos[i].dnExterno),
+          num(tr.dnInterno, 1),
+          num(f.trechos[i].distancia),
+          num(tr.velocidade),
+          num(tr.volume),
+          minSeg(tr.tempoSeg),
+        ]),
+        realce: [maisLento],
+        nota: [
+          `Linha realçada: ${rotulo(maisLento)} é o trecho que mais pesa na espera (${minSeg(
+            r.trechos[maisLento].tempoSeg
+          )}).`,
+          pontosSimultaneos
+            ? "Pontos simultâneos entram como informação de projeto: velocidade, tempo e volume usam a vazão informada no próprio trecho."
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      },
+      {
+        tipo: "resultado",
+        titulo: "Conclusão",
+        itens: [
+          {
+            label: "Tempo total de espera",
+            valor: minSeg(r.tempoTotalSeg),
+            nota: `${num(r.tempoTotalSeg, 1)} s · ${f.trechos.length} trecho(s) em série`,
+          },
+          {
+            label: "Volume total descartado",
+            valor: `${num(r.volumeTotal)} L`,
+            nota: "Água fria descartada em cada abertura até a quente chegar",
+          },
+          {
+            label: "Velocidade máxima",
+            valor: `${num(velMax)} m/s`,
+            nota:
+              velMax > 3
+                ? "Acima do limite de 3,0 m/s da NBR 5626 — reveja o DN do trecho"
+                : "Dentro do limite de 3,0 m/s da NBR 5626",
+            alerta: velMax > 3,
+          },
+        ],
+      },
+    ];
+
+    return {
+      cliente: cliente.trim(),
+      calculo: nome.trim() || "Sem nome",
+      normas: [
+        "ABNT NBR 5626:2020 — sistemas prediais de água fria e água quente",
+        "Equação da continuidade — V = Q/A (velocidade e tempo de trânsito)",
+        "Diâmetros internos CPVC por DN comercial — tabela da planilha de referência",
+      ],
+      blocos,
+      impedimento: faltas.length
+        ? `Complete o dimensionamento antes de emitir o memorial — ${faltas.join("; ")}.`
+        : undefined,
+    };
+  });
+
 
   return (
     <div className="space-y-5">
