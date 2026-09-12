@@ -17,7 +17,10 @@ const ESCURO_MAXIMO = 0.07;
 const LUZ_DECORACAO = 0.87; // lightness de saída da grade e das pastilhas
 const TINTA_CONTEUDO = 0.3; // lightness de saída das curvas, eixos e rótulos
 const ESCALA = 2;
-const TINTA_MINIMA = 0.002; // menos tinta que isso no PNG = gráfico ilegível no papel
+// Detector de folha em branco: rasterização que falha resulta em PNG todo branco
+// (fração 0). Os gráficos reais medem 5% a 9% de tinta, então o piso é conservador
+// — ele não promete detectar "a curva sumiu", só "nada foi desenhado".
+const TINTA_MINIMA = 0.0005;
 
 const PROPRIEDADES = ["fill", "stroke", "stop-color"] as const;
 
