@@ -43,6 +43,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { useMemorial, BlocoMemorial } from "@/lib/memorial";
 
 const MODULO = "pvc-cpvc-pressao";
 
@@ -57,6 +58,13 @@ interface Form {
 }
 
 const PADRAO: Form = { material: "PVC", residualInicial: 10, trechos: [], cenarios: [], bombaSelecionada: "" };
+
+// Memorial em PDF: mesmas casas decimais da tela, vírgula decimal e unidade junto.
+const memo = (v: number, casas: number, unidade?: string) =>
+  Number.isFinite(v)
+    ? `${v.toFixed(casas).replace(".", ",")}${unidade ? ` ${unidade}` : ""}`
+    : "—";
+const comoDigitado = (v: number) => String(v).replace(".", ",");
 
 function freshDraft(material: Material, count: number, base?: TrechoSalvo): TrechoSalvo {
   const d = trechoPadrao(material);
@@ -399,6 +407,352 @@ export default function PvcCpvcPressao() {
       else if (i < editIndex) setEditIndex(editIndex - 1);
     }
   }
+
+  // O memorial descreve as INSERÇÕES já confirmadas (o rascunho em montagem não entra)
+  // e lê apenas o que o cálculo encadeado devolveu, trecho a trecho.
+  useMemorial(MODULO, () => {
+    const rotuloTrecho = (t: TrechoSalvo, i: number) =>
+      [t.ambiente, t.nome].filter(Boolean).join(" · ") || `Trecho ${i + 1}`;
+
+    const idxCritico = projeto.reduce(
+      (pior, p, i) =>
+        p.resultado.pressaoResidual < projeto[pior].resultado.pressaoResidual ? i : pior,
+      0,
+    );
+
+    const nomesReprovados = projeto.flatMap(({ trecho, resultado }, i) =>
+      resultado.residualOk ? [] : [rotuloTrecho(trecho, i)],
+    );
+    const nomesVelocidade = projeto.flatMap(({ trecho, resultado }, i) =>
+      resultado.velocidadeOk ? [] : [rotuloTrecho(trecho, i)],
+    );
+    const nomesCurvaAcima = projeto.flatMap(({ trecho, resultado }, i) =>
+      resultado.chuveiroAcima || resultado.monocomandoAcima ? [rotuloTrecho(trecho, i)] : [],
+    );
+
+    const notaPorTrecho = [
+      "A pressão residual de cada trecho é a pressão de entrada do próximo, na ordem de inserção (#). A exigência do ponto é a pressão que o chuveiro selecionado pede na vazão do trecho; sem chuveiro vale o mínimo de 1,0 mca da NBR 5626. Realçado o trecho de menor pressão residual.",
+      nomesReprovados.length
+        ? `Pressão residual abaixo da exigência em: ${nomesReprovados.join(", ")}.`
+        : "",
+      nomesVelocidade.length
+        ? `Velocidade acima de 3 m/s em: ${nomesVelocidade.join(", ")}.`
+        : "",
+      nomesCurvaAcima.length
+        ? `Vazão acima do alcance da curva publicada do equipamento em: ${nomesCurvaAcima.join(", ")} — perda subestimada, revise a bitola ou o modelo.`
+        : "",
+    ].filter(Boolean);
+
+    const trechosPvc = projeto.flatMap(({ trecho, resultado }, i) =>
+      trecho.material === "PVC" ? [{ trecho, resultado, i }] : [],
+    );
+    const trechosCpvc = projeto.flatMap(({ trecho, resultado }, i) =>
+      trecho.material === "CPVC" ? [{ trecho, resultado, i }] : [],
+    );
+    const temLocalizada = projeto.some(
+      ({ resultado }) =>
+        resultado.perdaRegistroPressao > 0 ||
+        resultado.perdaValvulaMisturadora > 0 ||
+        resultado.perdaMonocomando > 0 ||
+        resultado.perdaFiltroY > 0,
+    );
+
+    const normas = [
+      "ABNT NBR 5626 — instalação predial de água fria e água quente: método dos pesos e pressão mínima nos pontos de utilização",
+      "Comprimento equivalente das conexões por bitola (tabelas da planilha do curso)",
+      trechosPvc.length
+        ? "Fair-Whipple-Hsiao — perda de carga distribuída em PVC (J = 8,69·10⁶ · Q¹·⁷⁵ · Dⁱⁿᵗ⁻⁴·⁷⁵ / 10)"
+        : "",
+      trechosCpvc.length
+        ? "Darcy-Weisbach com fator de atrito por Colebrook-White — perda de carga em CPVC"
+        : "",
+      "Curvas de fabricante: chuveiros e monocomandos (Docol / Deca), filtro Y por Kv e bombas de pressurização Texius (Q × H)",
+    ].filter(Boolean);
+
+    const blocos: BlocoMemorial[] = [
+      {
+        tipo: "campos",
+        titulo: "Dados de entrada",
+        itens: [
+          {
+            label: "Pressão de entrada do projeto",
+            valor: `${comoDigitado(f.residualInicial)} mca`,
+          },
+          { label: "Inserções (trechos)", valor: `${f.trechos.length}` },
+          { label: "Materiais", valor: mistura || "—" },
+          {
+            label: "Vazão-base do tronco",
+            valor: `${memo(baseTronco, 1, "L/min")}${temTronco ? "" : " (nenhum trecho marcado como tronco: a 1ª inserção)"}`,
+          },
+          {
+            label: "Cenários de vazão avaliados",
+            valor: cenariosValidos.length
+              ? `${cenariosValidos.map((q) => memo(q, 1)).join(" · ")} L/min${
+                  (f.cenarios ?? []).some((q) => Number.isFinite(q) && q > 0)
+                    ? ""
+                    : " (múltiplos automáticos do tronco)"
+                }`
+              : "—",
+          },
+          { label: "Bomba destacada", valor: bombaSelNome || "—" },
+        ],
+      },
+      {
+        tipo: "texto",
+        titulo: "Método de cálculo",
+        paragrafos: [
+          "A NBR 5626 dimensiona a rede predial trecho a trecho. A vazão de cada trecho sai do método dos pesos (Q = 0,3 · √Σpesos das peças abastecidas) ou é informada direto quando o projeto já fixa a vazão de uso. O comprimento de cálculo é o comprimento real somado ao comprimento equivalente das conexões lançadas na bitola do trecho.",
+          trechosCpvc.length
+            ? "A perda de carga distribuída usa Fair-Whipple-Hsiao nos trechos de PVC e Darcy-Weisbach nos trechos de CPVC, com fator de atrito de Colebrook-White resolvido por bissecção e número de Reynolds na viscosidade correspondente à temperatura da água. Registro de pressão, válvula misturadora e filtro Y entram como perdas localizadas (Kv do componente) e o monocomando, pela curva do fabricante na vazão do trecho."
+            : "A perda de carga distribuída usa Fair-Whipple-Hsiao, própria do PVC. Registro de pressão e filtro Y entram como perdas localizadas (Kv do componente) e o monocomando, pela curva do fabricante na vazão do trecho.",
+          "A pressão caminha em cadeia: a pressão disponível de um trecho é a residual do trecho anterior mais o desnível (descer ganha, subir perde) e o incremento do pressurizador; descontadas as perdas, sobra a pressão residual, que é comparada à exigência do ponto. A bomba de pressurização é escolhida por um ponto: a vazão total do tronco e a pressão que falta ao ponto mais crítico atingir o mínimo.",
+        ],
+      },
+      {
+        tipo: "tabela",
+        titulo: "Memorial de cálculo por trecho",
+        colunas: [
+          "#",
+          "Ambiente · trecho",
+          "Material · DN",
+          "L real (m)",
+          "L equiv. (m)",
+          "Q (L/min)",
+          "V (m/s)",
+          "Perdas (mca)",
+          "Residual (mca)",
+          "Exigência (mca)",
+        ],
+        linhas: projeto.map(({ trecho, resultado }, i) => [
+          `${i + 1}`,
+          `${rotuloTrecho(trecho, i)}${trecho.noTronco ? " · tronco" : ""}`,
+          `${trecho.material} ${trecho.diametro} mm`,
+          memo(trecho.comprimentoReal, 2),
+          memo(resultado.compEquivalente, 2),
+          memo(resultado.vazaoLmin, 2),
+          memo(resultado.velocidade, 2),
+          memo(
+            resultado.perdaCargaTotal +
+              resultado.perdaRegistroPressao +
+              resultado.perdaValvulaMisturadora +
+              resultado.perdaMonocomando +
+              resultado.perdaFiltroY,
+            3,
+          ),
+          memo(resultado.pressaoResidual, 2),
+          memo(resultado.pressaoMinima, 2),
+        ]),
+        realce: [idxCritico],
+        nota: notaPorTrecho.join(" "),
+      },
+      {
+        tipo: "tabela",
+        titulo: "Cadeia de pressões",
+        colunas: [
+          "#",
+          "Ambiente · trecho",
+          "Entrada (mca)",
+          "Desnível (m)",
+          "Pressurizador (mca)",
+          "Disponível (mca)",
+          "Residual (mca)",
+          "Atende",
+        ],
+        linhas: projeto.map(({ trecho, resultado }, i) => [
+          `${i + 1}`,
+          rotuloTrecho(trecho, i),
+          memo(i === 0 ? f.residualInicial : projeto[i - 1].resultado.pressaoResidual, 2),
+          memo(resultado.desnivel, 2),
+          memo(trecho.incrementoPressurizador, 2),
+          memo(resultado.pressaoDisponivel, 2),
+          memo(resultado.pressaoResidual, 2),
+          resultado.residualOk ? "sim" : "não",
+        ]),
+        nota: "Disponível = entrada + desnível + incremento do pressurizador. Desnível = desce − sobe: subir tubulação perde pressão estática, descer ganha.",
+      },
+    ];
+
+    if (trechosPvc.length) {
+      blocos.push({
+        tipo: "tabela",
+        titulo: "Perda distribuída nos trechos de PVC (Fair-Whipple-Hsiao)",
+        colunas: [
+          "#",
+          "Ambiente · trecho",
+          "J unitária (mca/m)",
+          "Perda na tubulação (mca)",
+          "Perda nas conexões (mca)",
+        ],
+        linhas: trechosPvc.map(({ trecho, resultado, i }) => [
+          `${i + 1}`,
+          rotuloTrecho(trecho, i),
+          memo(resultado.perdaUnitaria, 5),
+          memo(resultado.perdaCargaTubulacao, 4),
+          memo(resultado.perdaCargaConexao, 4),
+        ]),
+        nota: "Perda na tubulação = comprimento real × J; perda nas conexões = comprimento equivalente × J. Cálculo com π = 3,14, em paridade com a planilha do curso.",
+      });
+    }
+
+    if (trechosCpvc.length) {
+      blocos.push({
+        tipo: "tabela",
+        titulo: "Perda distribuída nos trechos de CPVC (Darcy-Weisbach)",
+        colunas: [
+          "#",
+          "Ambiente · trecho",
+          "Temperatura (°C)",
+          "Reynolds",
+          "Regime",
+          "Fator de atrito f",
+          "Perda Darcy (mca)",
+        ],
+        linhas: trechosCpvc.map(({ trecho, resultado, i }) => [
+          `${i + 1}`,
+          rotuloTrecho(trecho, i),
+          comoDigitado(trecho.temperaturaAgua),
+          resultado.reynolds > 0 ? memo(resultado.reynolds, 0) : "—",
+          resultado.regime,
+          resultado.fatorAtrito > 0 ? memo(resultado.fatorAtrito, 5) : "—",
+          memo(resultado.perdaCargaTubulacao, 4),
+        ]),
+        nota: "hf = f · (L total / Dⁱⁿᵗ) · V² / (2g), com f de Colebrook-White (rugosidade absoluta de 0,006 mm) e Reynolds na viscosidade da temperatura informada. No CPVC o comprimento equivalente das conexões já entra no comprimento total.",
+      });
+    }
+
+    if (temLocalizada) {
+      blocos.push({
+        tipo: "tabela",
+        titulo: "Perdas localizadas por trecho",
+        colunas: [
+          "#",
+          "Ambiente · trecho",
+          "Registro de pressão (mca)",
+          "Válvula misturadora (mca)",
+          "Monocomando (mca)",
+          "Filtro Y (mca)",
+        ],
+        linhas: projeto.map(({ trecho, resultado }, i) => [
+          `${i + 1}`,
+          rotuloTrecho(trecho, i),
+          memo(resultado.perdaRegistroPressao, 4),
+          memo(resultado.perdaValvulaMisturadora, 4),
+          memo(resultado.perdaMonocomando, 4),
+          memo(resultado.perdaFiltroY, 4),
+        ]),
+        nota: "Registro de pressão pela fórmula da planilha do curso; válvula misturadora e filtro Y por Kv; monocomando pela curva do fabricante, sempre na vazão do próprio trecho.",
+      });
+    }
+
+    if (pontosPerda.length) {
+      blocos.push({
+        tipo: "tabela",
+        titulo: "Cenários de vazão",
+        colunas: [
+          "Cenário",
+          "Vazão do tronco (L/min)",
+          "Perda de carga do projeto (mca)",
+          "Residual final (mca)",
+        ],
+        linhas: pontosPerda.map(([q, perda, residual], i) => [
+          `${i + 1}`,
+          memo(q, 1),
+          memo(perda, 3),
+          memo(residual, 2),
+        ]),
+        nota: temTronco
+          ? "A vazão do cenário entra nos trechos marcados como tronco; os demais mantêm a vazão de projeto. Residual final = pressão de entrada do projeto, mais desníveis e pressurizadores, menos a perda do cenário. Na vazão de projeto do tronco ela coincide com a residual da última inserção."
+          : "Sem trecho marcado como tronco, o cenário escala a vazão de todos os trechos proporcionalmente à da 1ª inserção. Residual final = pressão de entrada do projeto, mais desníveis e pressurizadores, menos a perda do cenário.",
+      });
+    }
+
+    if (bombasRes.length) {
+      blocos.push({
+        tipo: "tabela",
+        titulo: "Seleção de bomba de pressurização",
+        colunas: ["Bomba", `Entrega em ${memo(vazaoProjeto, 0)} L/min`, "Atende"],
+        linhas: bombasRes.map((b) => [
+          b.nome,
+          b.dentroFaixa ? memo(b.hEntrega, 2, "mca") : "vazão acima da faixa",
+          b.atende ? "sim" : "não",
+        ]),
+        realce: [bombasRes.findIndex((b) => b.nome === bombaSelNome)].filter((i) => i >= 0),
+        nota: `Atende = a bomba entrega pressão maior ou igual à necessária (${memo(pressaoNecessaria, 2, "mca")}) na vazão de projeto do tronco. Curvas Q × H aproximadas do catálogo Texius; dimensionamento preliminar.`,
+      });
+      if (bombaSel) {
+        blocos.push({
+          tipo: "grafico",
+          titulo: `Curva Q × H — ${bombaSel.nome} × pressão necessária`,
+          seletor: "#memorial-grafico-qh svg",
+        });
+      }
+    }
+
+    const conclusao: BlocoMemorial = {
+      tipo: "resultado",
+      titulo: "Conclusão",
+      itens: [
+        {
+          label: "Inserções no projeto",
+          valor: `${f.trechos.length}`,
+          nota: mistura || undefined,
+        },
+        {
+          label: "Pressão residual mínima",
+          valor: memo(criticaResidual ?? NaN, 2, "mca"),
+          nota: projeto.length
+            ? `trecho ${rotuloTrecho(projeto[idxCritico].trecho, idxCritico)}, com exigência de ${memo(projeto[idxCritico].resultado.pressaoMinima, 2, "mca")}`
+            : undefined,
+          alerta: criticaResidual !== null && criticaResidual < 1,
+        },
+        {
+          label: "Pontos reprovados",
+          valor: `${reprovados}`,
+          nota: nomesReprovados.length ? nomesReprovados.join(", ") : undefined,
+          alerta: reprovados > 0,
+        },
+        {
+          label: "Vazão de projeto (tronco)",
+          valor: memo(vazaoProjeto, 1, "L/min"),
+          nota: temTronco
+            ? "vazão do 1º trecho marcado como tronco"
+            : "vazão da 1ª inserção (nenhum trecho marcado como tronco)",
+        },
+        {
+          label: "Pressão necessária na bomba",
+          valor: memo(pressaoNecessaria, 2, "mca"),
+          nota:
+            pressaoNecessaria > 0 && pontoCritico
+              ? `falta no ponto crítico: ${[pontoCritico.trecho.ambiente, pontoCritico.trecho.nome].filter(Boolean).join(" · ") || "trecho"}`
+              : "a rede já atinge o mínimo exigido sem bomba",
+          alerta: pressaoNecessaria > 0,
+        },
+      ],
+    };
+    if (bombaSelRes) {
+      conclusao.itens.push({
+        label: "Bomba selecionada",
+        valor: bombaSelRes.nome,
+        nota: bombaSelRes.dentroFaixa
+          ? `entrega ${memo(bombaSelRes.hEntrega, 2, "mca")} em ${memo(vazaoProjeto, 0, "L/min")}`
+          : "vazão de projeto acima da faixa desta bomba",
+        alerta: !bombaSelRes.atende,
+      });
+    }
+    blocos.push(conclusao);
+
+    return {
+      cliente,
+      calculo: nome,
+      normas,
+      impedimento: !Number.isFinite(f.residualInicial)
+        ? "Informe a pressão de entrada do projeto (mca) antes de gerar o memorial."
+        : f.trechos.length === 0
+          ? "Projeto sem nenhuma inserção. Monte o trecho e toque em “+ Inserir no projeto” — o memorial descreve as inserções confirmadas, não o rascunho."
+          : undefined,
+      blocos,
+    };
+  });
 
   const opcoesDiam = diametrosDe(draft.material).map((d) => ({ value: d.comercial, label: d.rotulo }));
   const conexoes = conexoesDe(draft.material);
@@ -1253,15 +1607,17 @@ export default function PvcCpvcPressao() {
                   />
                 </div>
 
-                <QHChart
-                  pontos={curvasGrafico}
-                  qOp={vazaoProjeto}
-                  hOp={pressaoNecessaria}
-                  qMin={0}
-                  qMax={0}
-                  nomeBomba={bombaSel?.nome ?? ""}
-                  nomeSistema="Pressão necessária"
-                />
+                <div id="memorial-grafico-qh">
+                  <QHChart
+                    pontos={curvasGrafico}
+                    qOp={vazaoProjeto}
+                    hOp={pressaoNecessaria}
+                    qMin={0}
+                    qMax={0}
+                    nomeBomba={bombaSel?.nome ?? ""}
+                    nomeSistema="Pressão necessária"
+                  />
+                </div>
 
                 {bombaSelRes && (
                   <div className="mt-3 grid grid-cols-3 gap-2">
