@@ -51,8 +51,11 @@ function Campos({ bloco }: { bloco: BlocoCampos }) {
         <View key={linha} style={s.campoPar} wrap={false}>
           {par.map((item, coluna) => (
             <View key={coluna} style={s.campoItem}>
-              <Text style={s.campoRotulo}>{item.label}</Text>
-              <Text style={s.campoValor}>{item.valor}</Text>
+              <View style={s.campoLinha}>
+                <Text style={s.campoRotulo}>{item.label}</Text>
+                <Text style={s.campoValor}>{item.valor}</Text>
+              </View>
+              {item.nota ? <Text style={s.campoNota}>{item.nota}</Text> : null}
             </View>
           ))}
         </View>

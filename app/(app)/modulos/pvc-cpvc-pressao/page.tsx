@@ -482,17 +482,21 @@ export default function PvcCpvcPressao() {
           { label: "Materiais", valor: mistura || "—" },
           {
             label: "Vazão-base do tronco",
-            valor: `${memo(baseTronco, 1, "L/min")}${temTronco ? "" : " (nenhum trecho marcado como tronco: a 1ª inserção)"}`,
+            valor: memo(baseTronco, 1, "L/min"),
+            // a ressalva desce para a nota do campo: junto do valor ela quebrava a
+            // linha do documento em três
+            nota: temTronco ? undefined : "nenhum trecho marcado como tronco: a 1ª inserção",
           },
           {
             label: "Cenários de vazão avaliados",
             valor: cenariosValidos.length
-              ? `${cenariosValidos.map((q) => memo(q, 1)).join(" · ")} L/min${
-                  (f.cenarios ?? []).some((q) => Number.isFinite(q) && q > 0)
-                    ? ""
-                    : " (múltiplos automáticos do tronco)"
-                }`
+              ? `${cenariosValidos.map((q) => memo(q, 1)).join(" · ")} L/min`
               : "—",
+            nota:
+              cenariosValidos.length > 0 &&
+              !(f.cenarios ?? []).some((q) => Number.isFinite(q) && q > 0)
+                ? "múltiplos automáticos do tronco"
+                : undefined,
           },
           { label: "Bomba destacada", valor: bombaSelNome || "—" },
         ],

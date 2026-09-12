@@ -126,7 +126,11 @@ const MILHAR = /^[1-9]\d{0,2}\.\d{3}$/;
 
 // Unidades cujo valor nunca chega a mil nesta ferramenta: junto delas "12.345" só
 // pode ser decimal. As de grandeza grande (kcal, L, W, R$) ficam fora da lista.
-const UNIDADE_FRACIONARIA = /(mca\/m|mca|bar|m\/s|°C|m³\/h|m\/m|kgf\/cm²)\b/;
+//
+// Ancorada de propósito: a unidade só desambigua o número se vier COLADA nele. Sem a
+// âncora, "1.000 L × 10 °C = 10.000 kcal" achava o °C da oração seguinte e o milhar
+// de litros virava decimal ("1,000 L") num documento assinado.
+const UNIDADE_FRACIONARIA = /^\s?(mca\/m|mca|bar|m\/s|°C|m³\/h|m\/m|kgf\/cm²)\b/;
 
 /**
  * Ponto decimal -> vírgula, sem estragar milhar já formatado nem código de modelo.
@@ -141,9 +145,7 @@ export function virgulaDecimal(texto: string, fracionario = false): string {
     if ((token.match(/\./g) ?? []).length > 1) return token;
     if (!MILHAR.test(token)) return token.replace(".", ",");
     const depois = texto.slice(posicao + token.length);
-    return fracionario || UNIDADE_FRACIONARIA.test(depois.slice(0, 12))
-      ? token.replace(".", ",")
-      : token;
+    return fracionario || UNIDADE_FRACIONARIA.test(depois) ? token.replace(".", ",") : token;
   });
 }
 

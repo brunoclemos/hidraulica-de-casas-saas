@@ -74,15 +74,15 @@ export const s = StyleSheet.create({
   campoPar: { flexDirection: "row" },
   campoItem: {
     width: "50%",
-    flexDirection: "row",
-    justifyContent: "space-between",
     borderBottomWidth: 0.4,
     borderBottomColor: LINHA,
     paddingVertical: 2.5,
     paddingRight: 10,
   },
-  campoRotulo: { width: 150, fontSize: 8.5, color: SUAVE },
-  campoValor: { width: 95, fontSize: 8.5, color: PRETO, fontFamily: "Helvetica-Bold", textAlign: "right" },
+  campoLinha: { flexDirection: "row", justifyContent: "space-between" },
+  campoRotulo: { width: 140, fontSize: 8.5, color: SUAVE },
+  campoValor: { width: 105, fontSize: 8.5, color: PRETO, fontFamily: "Helvetica-Bold", textAlign: "right" },
+  campoNota: { fontSize: 7, color: SUAVE, marginTop: 1, textAlign: "right" },
 
   tabelaCabecalho: {
     flexDirection: "row",

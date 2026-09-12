@@ -85,6 +85,10 @@ const memo = (v: number, casas: number, unidade?: string) =>
     ? `${v.toFixed(casas).replace(".", ",")}${unidade ? ` ${unidade}` : ""}`
     : "—";
 const comoDigitado = (v: number) => String(v).replace(".", ",");
+// A pressão em mca vem da conversão de bar (3 bar = 30,5934 mca). Imprimir as quatro
+// casas no memorial sugere medição de quatro casas: no documento sai com duas, que é
+// a precisão real do dado. O valor usado no cálculo continua o cheio.
+const mcaMemorial = (v: number) => memo(v, 2, "mca");
 
 export default function VasoExpansao() {
   const [f, setF] = useState<Form>(PADRAO);
@@ -230,11 +234,13 @@ export default function VasoExpansao() {
             { label: "Volume de água do sistema", valor: `${comoDigitado(f.volume)} L` },
             {
               label: "Pressão da rede (Psist)",
-              valor: `${comoDigitado(f.pSist)} mca (${equivBar(emBar.pSist)})`,
+              valor: mcaMemorial(f.pSist),
+              nota: equivBar(emBar.pSist),
             },
             {
               label: "Pressão da válvula de segurança (Pvalv)",
-              valor: `${comoDigitado(f.pValv)} mca (${equivBar(emBar.pValv)})`,
+              valor: mcaMemorial(f.pValv),
+              nota: equivBar(emBar.pValv),
             },
           ],
         },

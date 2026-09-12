@@ -15,6 +15,10 @@ import { useEffect, useRef } from "react";
 export interface ItemCampo {
   label: string;
   valor: string;
+  // Complemento curto embaixo do valor. É o que impede um valor com três
+  // informações ("14.500 kcal/h · rendimento 0,86 · histerese 5 °C") de quebrar em
+  // quatro linhas na coluna estreita do documento.
+  nota?: string;
 }
 
 export interface BlocoCampos {

@@ -21,6 +21,7 @@ function saneiaBloco(bloco: Exclude<BlocoMemorial, { tipo: "grafico" }>): BlocoP
         itens: bloco.itens.map((i) => ({
           label: paraWinAnsi(i.label),
           valor: valorDeDocumento(i.valor),
+          nota: i.nota === undefined ? undefined : valorDeDocumento(i.nota),
         })),
       };
     case "tabela": {

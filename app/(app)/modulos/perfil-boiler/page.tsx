@@ -144,6 +144,11 @@ const NORMAS = [
 
 const num = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 const dec = (v: number, casas: number) => v.toFixed(casas).replace(".", ",");
+const milhar = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+// "Só resistência" vira cabeçalho de coluna: sem recapitalizar, a tabela saía com
+// "Sem apoio" e "resistência" lado a lado
+const semPrefixoSo = (nome: string) =>
+  nome.startsWith("Só ") ? nome[3].toUpperCase() + nome.slice(4) : nome;
 const listar = (itens: string[]) =>
   itens.length > 1 ? `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}` : itens[0];
 
@@ -802,10 +807,13 @@ function dadosMemorial(
     normas: NORMAS,
   };
 
-  const apoio = (ativo: boolean, hist: number, potencia: string) =>
-    ativo
-      ? `${potencia} · histerese ${num(hist)} °C (liga em T ≤ ${dec(f.tSetPoint - hist, 0)} °C)`
-      : "não considerada";
+  // Potência no valor; rendimento e histerese descem para a nota do campo. Juntos no
+  // valor, os três quebravam em quatro linhas na coluna do documento.
+  const apoio = (ativo: boolean, hist: number, potencia: string, extra = "") => {
+    if (!ativo) return { valor: "não considerada" };
+    const histerese = `histerese ${num(hist)} °C (liga em T ≤ ${dec(f.tSetPoint - hist, 0)} °C)`;
+    return { valor: potencia, nota: extra === "" ? histerese : `${extra} · ${histerese}` };
+  };
 
   const entrada: BlocoCampos = {
     tipo: "campos",
@@ -821,14 +829,15 @@ function dadosMemorial(
       { label: "Duração da simulação", valor: `${num(f.duracao)} min` },
       {
         label: "Central térmica a gás",
-        valor: apoio(
+        ...apoio(
           f.gasAtivo,
           f.histGas,
-          `${num(f.gasKcalh)} kcal/h · rendimento ${num(f.gasRendimento)}`,
+          `${num(f.gasKcalh)} kcal/h`,
+          `rendimento ${num(f.gasRendimento)}`,
         ),
       },
-      { label: "Resistência elétrica", valor: apoio(f.eletAtivo, f.histElet, `${num(f.eletKW)} kW`) },
-      { label: "Bomba de calor", valor: apoio(f.bombaAtivo, f.histBomba, `${num(f.bombaBTUh)} BTU/h`) },
+      { label: "Resistência elétrica", ...apoio(f.eletAtivo, f.histElet, `${num(f.eletKW)} kW`) },
+      { label: "Bomba de calor", ...apoio(f.bombaAtivo, f.histBomba, `${num(f.bombaBTUh)} BTU/h`) },
       { label: "ΔT do tempo de aquecimento", valor: `${num(f.deltaTAquecimento)} °C` },
     ],
   };
@@ -879,7 +888,7 @@ function dadosMemorial(
   const simulacao: BlocoTabela = {
     tipo: "tabela",
     titulo: "Simulação minuto a minuto",
-    colunas: ["min", ...cenarios.map((c) => c.nome.replace("Só ", ""))],
+    colunas: ["min", ...cenarios.map((c) => semPrefixoSo(c.nome))],
     linhas: amostra.map((idx) => [
       String(idx + 1),
       ...cenarios.map(
@@ -954,21 +963,32 @@ function dadosMemorial(
       titulo: "Conclusão",
       itens: [
         { label: "Vazão de mistura (N × Q)", valor: `${dec(d.vazaoMistura, 1)} L/min` },
-        ...cenarios.map((c) => ({
+        // O último cenário é o do projeto: com os apoios ligados somados, ou o apoio
+        // único, ou "Sem apoio" quando nenhum está ligado. Só ele leva alerta — os
+        // outros estão no documento para comparação, e cinco linhas vermelhas
+        // seguidas faziam o memorial parecer reprovado em bloco.
+        ...cenarios.map((c, i) => ({
           label: c.nome,
-          valor: `${dec(c.curva.temps[minutos - 1], 1)} °C no minuto ${minutos}`,
-          nota: `${
+          valor: `${dec(c.curva.temps[minutos - 1], 1)} °C`,
+          nota: [
+            i === cenarios.length - 1 ? "cenário do projeto" : null,
+            `no minuto ${minutos}`,
             c.curva.cruzaEm === null
               ? "não cruza a temperatura de mistura na janela simulada"
-              : `cruza a temperatura de mistura em ${minLabel(c.curva.cruzaEm)}`
-          } · mínima de ${dec(c.curva.tMin, 1)} °C no minuto ${c.curva.tMinMinuto}`,
-          alerta: c.curva.cruzaEm !== null,
+              : `cruza a temperatura de mistura em ${minLabel(c.curva.cruzaEm)}`,
+            c.curva.tMinMinuto === minutos
+              ? null
+              : `mínima de ${dec(c.curva.tMin, 1)} °C no minuto ${c.curva.tMinMinuto}`,
+          ]
+            .filter((parte): parte is string => parte !== null)
+            .join(" · "),
+          alerta: i === cenarios.length - 1 && c.curva.cruzaEm !== null,
         })),
         ...(f.gasAtivo && f.gasRendimento > 0
           ? [
               {
                 label: "Potência ideal do gás (método da vazão)",
-                valor: `${dec(d.potIdealGas, 0)} kcal/h`,
+                valor: `${milhar(d.potIdealGas)} kcal/h`,
                 nota: "potência que reporia o consumo dos banhos em regime",
               },
             ]
@@ -977,7 +997,7 @@ function dadosMemorial(
           ? [
               {
                 label: "Potência ideal elétrica (método da vazão)",
-                valor: `${dec(d.potIdealElet, 0)} kcal/h`,
+                valor: `${milhar(d.potIdealElet)} kcal/h`,
                 nota: "potência que reporia o consumo dos banhos em regime",
               },
             ]
