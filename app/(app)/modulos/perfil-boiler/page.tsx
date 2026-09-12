@@ -2,10 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { calcular, duracaoLabel, minLabel, Inputs } from "@/lib/calc/perfil-boiler";
+import { calcular, duracaoLabel, minLabel, Inputs, Resultado } from "@/lib/calc/perfil-boiler";
 import { NumberField, Stepper, Accordion, Toggle } from "@/components/Fields";
 import { LineChart, Serie, RefLinha } from "@/components/LineChart";
 import { SaveBadge, EstadoSalvo } from "@/components/SaveBadge";
+import {
+  useMemorial,
+  BlocoCampos,
+  BlocoMemorial,
+  BlocoTabela,
+  DadosMemorial,
+} from "@/lib/memorial";
 import {
   listarProjetos,
   salvarProjeto,
@@ -128,6 +135,17 @@ function normalizarForm(raw: unknown): Form {
 function toInputs(f: Form): Inputs {
   return { ...f };
 }
+
+const NORMAS = [
+  "Planilha do curso Hidráulica de Casas — Perfil Térmico do Boiler V3 (abas Parâmetros e Simulação)",
+  "Balanço de energia sensível da água (1 kcal/kg·°C) integrado minuto a minuto",
+  "Conversões de potência: 1 kW = 860 kcal/h · 1 BTU/h = 0,252 kcal/h",
+];
+
+const num = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+const dec = (v: number, casas: number) => v.toFixed(casas).replace(".", ",");
+const listar = (itens: string[]) =>
+  itens.length > 1 ? `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}` : itens[0];
 
 export default function PerfilBoiler() {
   const [f, setF] = useState<Form>(ZERADO);
@@ -278,6 +296,8 @@ export default function PerfilBoiler() {
     });
     return { series, yMin, yMax, refs };
   }, [cenarios, f]);
+
+  useMemorial(MODULO, () => dadosMemorial(f, r, pronto, cliente, nome));
 
   return (
     // full-bleed por negative margins — NÃO usar transform aqui: transform em
@@ -495,15 +515,19 @@ export default function PerfilBoiler() {
               </div>
 
               {pronto ? (
-                <LineChart
-                  series={chart.series}
-                  duracao={f.duracao}
-                  yMin={chart.yMin}
-                  yMax={chart.yMax}
-                  refs={chart.refs}
-                  zonaAbaixoDe={f.tMistura}
-                  zonaLabel="zona de banho frio"
-                />
+                // id só pro memorial achar o SVG (BlocoGrafico.seletor). Sem classe
+                // nova aqui: o full-bleed depende das margens negativas do wrapper.
+                <div id="grafico-perfil">
+                  <LineChart
+                    series={chart.series}
+                    duracao={f.duracao}
+                    yMin={chart.yMin}
+                    yMax={chart.yMax}
+                    refs={chart.refs}
+                    zonaAbaixoDe={f.tMistura}
+                    zonaLabel="zona de banho frio"
+                  />
+                </div>
               ) : (
                 <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 px-6 text-center">
                   <svg width="46" height="34" viewBox="0 0 46 34" fill="none" aria-hidden>
@@ -759,6 +783,197 @@ export default function PerfilBoiler() {
       </div>
     </div>
   );
+}
+
+// Memorial de cálculo: só lê o que a tela já calculou e repete os mesmos números,
+// com as mesmas casas decimais. O guard `pronto` vem de fora porque é o MESMO que
+// libera o gráfico e a tabela — sem ele o motor divide por volume 0 e devolve NaN.
+function dadosMemorial(
+  f: Form,
+  r: Resultado,
+  pronto: boolean,
+  cliente: string,
+  nome: string,
+): DadosMemorial {
+  const { derivados: d, cenarios, aquecimento, validacao } = r;
+  const identificacao = {
+    cliente: cliente.trim(),
+    calculo: nome.trim() || "Sem nome",
+    normas: NORMAS,
+  };
+
+  const apoio = (ativo: boolean, hist: number, potencia: string) =>
+    ativo
+      ? `${potencia} · histerese ${num(hist)} °C (liga em T ≤ ${dec(f.tSetPoint - hist, 0)} °C)`
+      : "não considerada";
+
+  const entrada: BlocoCampos = {
+    tipo: "campos",
+    titulo: "Dados de entrada",
+    itens: [
+      { label: "Set point do boiler (TQ)", valor: `${num(f.tSetPoint)} °C` },
+      { label: "Volume do boiler", valor: `${num(f.volume)} L` },
+      { label: "Temperatura inicial (Ti)", valor: `${num(f.tInicial)} °C` },
+      { label: "Água fria (TF)", valor: `${num(f.tFria)} °C` },
+      { label: "Mistura na válvula termostática (TM)", valor: `${num(f.tMistura)} °C` },
+      { label: "Banhos simultâneos", valor: num(f.nBanhos) },
+      { label: "Vazão por ducha", valor: `${num(f.vazaoDucha)} L/min` },
+      { label: "Duração da simulação", valor: `${num(f.duracao)} min` },
+      {
+        label: "Central térmica a gás",
+        valor: apoio(
+          f.gasAtivo,
+          f.histGas,
+          `${num(f.gasKcalh)} kcal/h · rendimento ${num(f.gasRendimento)}`,
+        ),
+      },
+      { label: "Resistência elétrica", valor: apoio(f.eletAtivo, f.histElet, `${num(f.eletKW)} kW`) },
+      { label: "Bomba de calor", valor: apoio(f.bombaAtivo, f.histBomba, `${num(f.bombaBTUh)} BTU/h`) },
+      { label: "ΔT do tempo de aquecimento", valor: `${num(f.deltaTAquecimento)} °C` },
+    ],
+  };
+
+  if (!pronto) {
+    const faltando = [
+      f.volume > 0 ? null : "o volume do boiler",
+      f.nBanhos > 0 ? null : "o nº de banhos",
+      f.vazaoDucha > 0 ? null : "a vazão por ducha",
+      f.duracao > 0 ? null : "a duração da simulação",
+    ].filter((x): x is string => x !== null);
+    return {
+      ...identificacao,
+      blocos: [entrada],
+      impedimento:
+        faltando.length > 0
+          ? `Preencha ${listar(faltando)} para gerar o memorial.`
+          : (validacao.mensagem ??
+            "Revise as temperaturas: a ordem física é água fria < mistura < set point."),
+    };
+  }
+
+  const minutos = cenarios[0].curva.temps.length;
+  // No papel, 240 linhas viram lixo: amostra em passo regular e sempre fecha no
+  // último minuto simulado (a simulação em si continua minuto a minuto).
+  const passo = Math.max(1, Math.ceil(minutos / 60));
+  const amostra: number[] = [];
+  for (let idx = 0; idx < minutos; idx += passo) amostra.push(idx);
+  if (amostra[amostra.length - 1] !== minutos - 1) amostra.push(minutos - 1);
+
+  const cruzamentos = new Set(
+    cenarios
+      .map((c) => c.curva.cruzaEm)
+      .filter((m): m is number => m !== null)
+      .map((m) => m + 1),
+  );
+
+  const ganhos = [
+    f.gasAtivo ? `gás ${dec(d.ganhoGas, 3)}` : null,
+    f.eletAtivo ? `resistência ${dec(d.ganhoElet, 3)}` : null,
+    f.bombaAtivo ? `bomba ${dec(d.ganhoBomba, 3)}` : null,
+  ].filter((x): x is string => x !== null);
+
+  const realce = amostra
+    .map((idx, pos) => (cruzamentos.has(idx + 1) ? pos : -1))
+    .filter((pos) => pos >= 0);
+
+  const simulacao: BlocoTabela = {
+    tipo: "tabela",
+    titulo: "Simulação minuto a minuto",
+    colunas: ["min", ...cenarios.map((c) => c.nome.replace("Só ", ""))],
+    linhas: amostra.map((idx) => [
+      String(idx + 1),
+      ...cenarios.map(
+        (c) => `${dec(c.curva.temps[idx], 1)}${c.curva.status.some((s) => s[idx]) ? "*" : ""}`,
+      ),
+    ]),
+    realce,
+    nota: [
+      "Temperaturas em °C.",
+      passo > 1
+        ? `Uma linha a cada ${passo} min (a simulação roda minuto a minuto).`
+        : "Uma linha por minuto.",
+      "O asterisco marca o minuto com o apoio ligado — no cenário combinado, com qualquer apoio ativo ligado.",
+      `Consumo de ${dec(d.consumoPorMin, 3)} °C/min${
+        ganhos.length > 0 ? `; ganho com o apoio ligado em °C/min: ${ganhos.join(", ")}` : ""
+      }.`,
+      realce.length > 0
+        ? `Linhas realçadas: o minuto em que o cenário cruza a temperatura de mistura (${num(f.tMistura)} °C).`
+        : cruzamentos.size > 0
+          ? `O cruzamento da temperatura de mistura (${num(f.tMistura)} °C) cai entre duas linhas amostradas — o minuto de cada cenário está na conclusão.`
+          : `Nenhum cenário cruza a temperatura de mistura (${num(f.tMistura)} °C) na janela simulada.`,
+    ].join(" "),
+  };
+
+  const blocos: BlocoMemorial[] = [
+    entrada,
+    {
+      tipo: "texto",
+      titulo: "Método de cálculo",
+      paragrafos: [
+        "O boiler é tratado como um volume único e bem misturado. A simulação integra o balanço de energia sensível da água em passos de 1 minuto, partindo da temperatura inicial informada, e acompanha em paralelo os cenários sem apoio, com cada apoio isolado e com os apoios ativos somados.",
+        "Enquanto o boiler está acima da temperatura de mistura, a válvula termostática compensa a queda puxando proporcionalmente mais água quente, e o consumo é constante: N × Q × (TM − TF) ÷ volume. Abaixo da temperatura de mistura a válvula já está toda aberta e não tem o que compensar: a vazão consumida passa a ser a dos banhos e a queda vira proporcional a (T − TF), desacelerando rumo à temperatura da água fria. Em T = TM as duas expressões coincidem, então a emenda é contínua.",
+        "Cada apoio liga quando a temperatura cai a TQ menos a sua histerese e só desliga quando o boiler volta ao set point. O ganho de cada apoio ligado é a potência térmica dividida por 60 × volume: o gás entra com a potência multiplicada pelo rendimento (perda na chaminé), a resistência elétrica a 1 kW = 860 kcal/h sem rendimento (efeito Joule) e a bomba de calor pela saída térmica de 1 BTU/h = 0,252 kcal/h.",
+      ],
+    },
+    simulacao,
+  ];
+
+  if (f.deltaTAquecimento > 0 && aquecimento.length > 0) {
+    blocos.push({
+      tipo: "tabela",
+      titulo: "Tempo de aquecimento sem consumo",
+      colunas: ["Apoio", "Potência", "Tempo"],
+      linhas: aquecimento.map((a) => [
+        a.nome,
+        `${a.potKcalh.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kcal/h`,
+        duracaoLabel(a.minutos),
+      ]),
+      nota: `Boiler parado, sem banho simultâneo. Energia necessária: ${num(f.volume)} L × ${num(
+        f.deltaTAquecimento,
+      )} °C = ${num(f.volume * f.deltaTAquecimento)} kcal.`,
+    });
+  }
+
+  blocos.push(
+    { tipo: "grafico", titulo: "Decaimento térmico × tempo", seletor: "#grafico-perfil svg" },
+    {
+      tipo: "resultado",
+      titulo: "Conclusão",
+      itens: [
+        { label: "Vazão de mistura (N × Q)", valor: `${dec(d.vazaoMistura, 1)} L/min` },
+        ...cenarios.map((c) => ({
+          label: c.nome,
+          valor: `${dec(c.curva.temps[minutos - 1], 1)} °C no minuto ${minutos}`,
+          nota: `${
+            c.curva.cruzaEm === null
+              ? "não cruza a temperatura de mistura na janela simulada"
+              : `cruza a temperatura de mistura em ${minLabel(c.curva.cruzaEm)}`
+          } · mínima de ${dec(c.curva.tMin, 1)} °C no minuto ${c.curva.tMinMinuto}`,
+          alerta: c.curva.cruzaEm !== null,
+        })),
+        ...(f.gasAtivo && f.gasRendimento > 0
+          ? [
+              {
+                label: "Potência ideal do gás (método da vazão)",
+                valor: `${dec(d.potIdealGas, 0)} kcal/h`,
+                nota: "potência que reporia o consumo dos banhos em regime",
+              },
+            ]
+          : []),
+        ...(f.eletAtivo
+          ? [
+              {
+                label: "Potência ideal elétrica (método da vazão)",
+                valor: `${dec(d.potIdealElet, 0)} kcal/h`,
+                nota: "potência que reporia o consumo dos banhos em regime",
+              },
+            ]
+          : []),
+      ],
+    },
+  );
+
+  return { ...identificacao, blocos };
 }
 
 function Det({ l, v }: { l: string; v: string }) {
