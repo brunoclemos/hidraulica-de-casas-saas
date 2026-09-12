@@ -8,6 +8,7 @@ import {
   detalheEmVazao,
   vazaoParaVelocidade,
   dnInterno,
+  equivDaPeca,
   Inputs,
   Trecho,
   DN_CPVC,
@@ -30,6 +31,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { useMemorial, BlocoMemorial } from "@/lib/memorial";
 import fotoTbhweSs from "./fotos/tbhwe-ss-100w.png";
 import fotoTbhweIp from "./fotos/tbhwe-ip-br-120w.png";
 import fotoTbhux from "./fotos/tbhux-rn.png";
@@ -293,6 +295,263 @@ export default function RecirculacaoConsumo() {
     }
     return cols;
   }, [f, qOp]);
+
+  useMemorial(MODULO, () => {
+    const rotulo = (i: number) => f.trechos[i].nome.trim() || `Trecho ${i + 1}`;
+    const dnRotulo = (dn: number) => opcoesDN.find((o) => o.value === dn)?.label ?? "—";
+    const perdaLocal = (tr: (typeof r.trechos)[number]) =>
+      tr.perdaRegistro + tr.perdaValvula + tr.perdaAquecedor;
+    const cenariosValidos = f.cenarios.filter((q) => Number.isFinite(q) && q > 0);
+
+    const faltas: string[] = [];
+    if (!Number.isFinite(f.temperaturaAgua)) faltas.push("temperatura da água");
+    if (!Number.isFinite(f.pressaoDisponivelInicial)) faltas.push("pressão disponível no início");
+    if (f.trechos.length === 0) faltas.push("nenhum trecho no caminho crítico");
+    if (cenariosValidos.length < 3)
+      faltas.push("informe ao menos 3 cenários de vazão do tronco (a curva do sistema é um ajuste quadrático)");
+    f.trechos.forEach((t, i) => {
+      const tr = r.trechos[i];
+      const pendencias: string[] = [];
+      if (!(t.vazao > 0)) pendencias.push("vazão");
+      if (!Number.isFinite(t.comprimentoReal)) pendencias.push("comprimento real");
+      if (!(tr.dnInterno > 0)) pendencias.push("DN");
+      if (!(tr.comprimentoTotal > 0) && perdaLocal(tr) === 0)
+        pendencias.push("comprimento real ou conexões");
+      if (t.valvulasMisturadoras > 0 && !(t.kvValvula > 0)) pendencias.push("Kv da válvula misturadora");
+      if (t.aquecedorModelo !== "" && !(t.aquecedorQtd > 0)) pendencias.push("quantidade de aquecedores");
+      if (pendencias.length) faltas.push(`${rotulo(i)}: ${pendencias.join(", ")}`);
+    });
+
+    const trechoCritico = r.trechos.reduce(
+      (mx, tr, i) =>
+        tr.perdaDistribuida + perdaLocal(tr) >
+        r.trechos[mx].perdaDistribuida + perdaLocal(r.trechos[mx])
+          ? i
+          : mx,
+      0
+    );
+    const velMax = r.trechos.length ? Math.max(...r.trechos.map((tr) => tr.velocidade)) : 0;
+
+    const linhasConexoes = f.trechos.flatMap((t, i) =>
+      Object.entries(t.conexoes)
+        .filter(([, qtd]) => qtd > 0)
+        .map(([peca, qtd]) => [
+          rotulo(i),
+          peca,
+          num(qtd, 0),
+          num(equivDaPeca(peca, t.dnExterno)),
+          num(qtd * equivDaPeca(peca, t.dnExterno)),
+        ])
+    );
+
+    const linhasLocais = f.trechos.flatMap((t, i) => {
+      const tr = r.trechos[i];
+      const linhas: string[][] = [];
+      if (t.registrosPressao > 0)
+        linhas.push([rotulo(i), "Registro de pressão", num(t.registrosPressao, 0), num(tr.perdaRegistro, 3)]);
+      if (t.valvulasMisturadoras > 0)
+        linhas.push([
+          rotulo(i),
+          `Válvula misturadora (Kv ${num(t.kvValvula)} m³/h)`,
+          num(t.valvulasMisturadoras, 0),
+          num(tr.perdaValvula, 3),
+        ]);
+      if (t.aquecedorModelo !== "" && t.aquecedorQtd > 0)
+        linhas.push([
+          rotulo(i),
+          `Aquecedor de passagem ${t.aquecedorModelo}`,
+          num(t.aquecedorQtd, 0),
+          num(tr.perdaAquecedor, 3),
+        ]);
+      return linhas;
+    });
+
+    const residualNota =
+      f.pressaoDisponivelInicial === 0
+        ? "Sem pressão declarada na entrada: o valor negativo é a altura manométrica que o circulador precisa entregar."
+        : r.residualFinal < 0
+        ? "Pressão insuficiente: o caminho crítico consome mais do que a pressão disponível na entrada."
+        : "Pressão disponível na entrada cobre o caminho crítico.";
+
+    const blocos: BlocoMemorial[] = [
+      {
+        tipo: "campos",
+        titulo: "Dados de entrada",
+        itens: [
+          { label: "Temperatura da água", valor: `${num(f.temperaturaAgua, 0)} °C` },
+          { label: "Pressão disponível no início", valor: `${num(f.pressaoDisponivelInicial)} mca` },
+          { label: "Trechos do caminho crítico", valor: num(f.trechos.length, 0) },
+          {
+            label: "Cenários de vazão do tronco",
+            valor: cenariosValidos.length
+              ? `${cenariosValidos.map((q) => num(q, 1)).join(" · ")} L/min`
+              : "—",
+          },
+          { label: "Circulador avaliado", valor: f.bombaSelecionada },
+        ],
+      },
+      {
+        tipo: "texto",
+        titulo: "Método de cálculo",
+        paragrafos: [
+          "O dimensionamento percorre o caminho crítico trecho a trecho. As conexões de cada trecho são convertidas em comprimento equivalente e somadas ao comprimento real; sobre esse comprimento total a perda de carga distribuída sai de Darcy-Weisbach, com o fator de atrito por Swamee-Jain (aproximação explícita de Colebrook-White) a partir do número de Reynolds e da viscosidade da água na temperatura informada. A pressão residual é acumulada ao longo do caminho: entra a do trecho anterior e saem a perda de carga e as perdas localizadas.",
+          "As perdas localizadas entram pelo que cada peça realmente impõe: registro de pressão pela fórmula da planilha de referência, válvula misturadora pelo Kv do fabricante e aquecedor de passagem pela curva h = a·Q^b do catálogo, com a vazão repartida entre as unidades em paralelo.",
+          "A curva do sistema é levantada em cenários de vazão do tronco — cada cenário escala a vazão de todos os trechos proporcionalmente ao Trecho 1 — e ajustada por regressão quadrática H = a + b·Q + c·Q². O ponto de operação de cada circulador é o cruzamento dessa curva com a curva do catálogo da bomba; atende quem cruza dentro da faixa útil de vazão delimitada pelos cenários.",
+        ],
+      },
+      {
+        tipo: "tabela",
+        titulo: "Caminho crítico — trecho a trecho",
+        colunas: [
+          "Trecho",
+          "DN",
+          "Q (L/min)",
+          "L real (m)",
+          "L equiv. (m)",
+          "L total (m)",
+          "V (m/s)",
+          "Re",
+          "f",
+          "h_f (mca)",
+          "Residual (mca)",
+        ],
+        linhas: r.trechos.map((tr, i) => [
+          rotulo(i),
+          dnRotulo(tr.dnExterno),
+          num(tr.vazao),
+          num(tr.comprimentoReal),
+          num(tr.comprimentoEquiv),
+          num(tr.comprimentoTotal),
+          num(tr.velocidade),
+          num(tr.reynolds, 0),
+          num(tr.fatorAtrito, 4),
+          num(tr.perdaDistribuida),
+          num(tr.pResidualFinal),
+        ]),
+        realce: [trechoCritico],
+        nota: `Linha realçada: ${rotulo(trechoCritico)} é o trecho de maior perda de carga (${num(
+          r.trechos[trechoCritico].perdaDistribuida + perdaLocal(r.trechos[trechoCritico])
+        )} mca, distribuída mais localizadas). Residual = pressão do trecho anterior menos perda de carga e perdas localizadas.`,
+      },
+      ...(linhasConexoes.length
+        ? [
+            {
+              tipo: "tabela" as const,
+              titulo: "Comprimento equivalente das conexões",
+              colunas: ["Trecho", "Conexão", "Qtd.", "Equiv. unit. (m)", "Equiv. total (m)"],
+              linhas: linhasConexoes,
+              nota: "Comprimento equivalente por peça e por DN conforme a tabela CPVC da planilha de referência. A soma de cada trecho entra no comprimento total usado na perda de carga.",
+            },
+          ]
+        : []),
+      ...(linhasLocais.length
+        ? [
+            {
+              tipo: "tabela" as const,
+              titulo: "Perdas localizadas",
+              colunas: ["Trecho", "Peça", "Qtd.", "Perda (mca)"],
+              linhas: linhasLocais,
+              nota: "Registro de pressão pela fórmula da planilha de referência (π = 3,14 literal, como no curso); válvula misturadora por Kv; aquecedor de passagem pela curva h = a·Q^b do catálogo, com a vazão dividida entre as unidades em paralelo.",
+            },
+          ]
+        : []),
+      {
+        tipo: "tabela",
+        titulo: "Curva do sistema — perda de carga por cenário",
+        colunas: ["Cenário", "Q do tronco (L/min)", "Perda de carga (mca)"],
+        linhas: r.pontosSistema.map(([q, h], i) => [`Cenário ${i + 1}`, num(q, 1), num(h, 3)]),
+        nota: `Cada cenário escala a vazão de todos os trechos proporcionalmente ao Trecho 1. Ajuste quadrático da curva do sistema: H = ${num(
+          r.sistema.a,
+          6
+        )} + ${num(r.sistema.b, 6)}·Q + ${num(r.sistema.c, 6)}·Q² (H em mca, Q em L/min).`,
+      },
+      {
+        tipo: "tabela",
+        titulo: "Ponto de operação × circuladores",
+        colunas: ["Circulador", "Q oper. (L/min)", "P oper. (mca)", "Atende?"],
+        linhas: r.bombas.map((b) => [
+          b.nome,
+          b.qOp !== null ? num(b.qOp, 1) : "—",
+          b.hOp !== null ? num(b.hOp) : "—",
+          b.atende ? "sim" : "fora",
+        ]),
+        realce: [r.bombas.findIndex((b) => b.nome === f.bombaSelecionada)].filter((i) => i >= 0),
+        nota: `Linha realçada: circulador adotado no projeto. O ponto de operação é o cruzamento da curva da bomba com a curva do sistema; "atende" significa cair dentro da faixa útil de vazão dos cenários (${num(
+          r.qMinSistema,
+          1
+        )} a ${num(r.qMaxSistema, 1)} L/min).`,
+      },
+      {
+        tipo: "grafico",
+        titulo: "Curva do sistema × curva do circulador",
+        seletor: "#grafico-qh svg",
+      },
+      {
+        tipo: "resultado",
+        titulo: "Conclusão",
+        itens: [
+          { label: "Perda de carga total do caminho crítico", valor: `${num(r.perdaTotal)} mca` },
+          {
+            label: "Comprimento total (real + equivalente)",
+            valor: `${num(r.comprimentoTotal, 1)} m`,
+          },
+          {
+            label: "Pressão residual no ponto final",
+            valor: `${num(r.residualFinal)} mca`,
+            nota: residualNota,
+            alerta: f.pressaoDisponivelInicial > 0 && r.residualFinal < 0,
+          },
+          { label: "Circulador adotado", valor: f.bombaSelecionada },
+          {
+            label: "Vazão de operação",
+            valor: bombaSelRes?.qOp != null ? `${num(bombaSelRes.qOp, 1)} L/min` : "—",
+            nota:
+              bombaSelRes?.qOp == null
+                ? "A curva deste circulador não cruza a curva do sistema"
+                : undefined,
+            alerta: bombaSelRes?.qOp == null,
+          },
+          {
+            label: "Pressão de operação",
+            valor: bombaSelRes?.hOp != null ? `${num(bombaSelRes.hOp)} mca` : "—",
+          },
+          {
+            label: "Faixa útil de vazão",
+            valor: bombaSelRes?.atende ? "Dentro" : "Fora",
+            nota: `Faixa útil dos cenários: ${num(r.qMinSistema, 1)} a ${num(r.qMaxSistema, 1)} L/min`,
+            alerta: !bombaSelRes?.atende,
+          },
+          {
+            label: "Velocidade máxima nos trechos",
+            valor: `${num(velMax)} m/s`,
+            nota:
+              velMax > 3
+                ? "Acima do limite de 3,0 m/s da NBR 5626 — reveja o DN do trecho"
+                : "Dentro do limite de 3,0 m/s da NBR 5626",
+            alerta: velMax > 3,
+          },
+        ],
+      },
+    ];
+
+    return {
+      cliente: cliente.trim(),
+      calculo: nome.trim() || "Sem nome",
+      normas: [
+        "ABNT NBR 5626:2020 — sistemas prediais de água fria e água quente",
+        "Darcy-Weisbach — perda de carga distribuída",
+        "Swamee-Jain — fator de atrito (aproximação explícita de Colebrook-White)",
+        "Comprimento equivalente por conexão e por DN — tabela CPVC da planilha de referência",
+        "Curvas de aquecedores de passagem a gás Rinnai — h = a·Q^b (catálogo)",
+        "Curvas de circuladores Texius — catálogo do fabricante",
+      ],
+      blocos,
+      impedimento: faltas.length
+        ? `Complete o dimensionamento antes de emitir o memorial — ${faltas.join("; ")}.`
+        : undefined,
+    };
+  });
+
 
   return (
     <div className="space-y-5">
@@ -566,14 +825,17 @@ export default function RecirculacaoConsumo() {
           ))}
         </div>
 
-        <QHChart
-          pontos={curvas}
-          qOp={bombaSelRes?.qOp ?? null}
-          hOp={bombaSelRes?.hOp ?? null}
-          qMin={r.qMinSistema}
-          qMax={r.qMaxSistema}
-          nomeBomba={bombaSel.nome}
-        />
+        {/* id fixo: o memorial serializa este SVG para dentro do PDF */}
+        <div id="grafico-qh">
+          <QHChart
+            pontos={curvas}
+            qOp={bombaSelRes?.qOp ?? null}
+            hOp={bombaSelRes?.hOp ?? null}
+            qMin={r.qMinSistema}
+            qMax={r.qMaxSistema}
+            nomeBomba={bombaSel.nome}
+          />
+        </div>
 
         {/* RESUMO — vazão x perda de carga por cenário */}
         <div className="mt-4">
