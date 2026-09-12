@@ -12,6 +12,7 @@ import {
   CATALOGO_RINNAI,
   DATA_REF_PRECOS,
   TABELA_C1,
+  precoEfetivo,
   Arranjo,
   ResultadoSugestao,
 } from "@/lib/calc/apoio-gas";
@@ -27,6 +28,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { useMemorial } from "@/lib/memorial";
 
 const MODULO = "apoio-gas";
 
@@ -45,6 +47,8 @@ const fmtKcal = (v: number) => (isFinite(v) ? `${nf(0).format(v)} kcal/h` : "—
 const fmtLmin = (v: number) => (isFinite(v) ? `${nf(2).format(v)} l/min` : "—");
 const fmtMin = (v: number) => (isFinite(v) ? `${nf(1).format(v)} min` : "—");
 const fmtBRL = (v: number) => `R$ ${nf(0).format(v)}`;
+// A Tabela C.1 publica frações, não decimais.
+const fracaoC1 = (fArmaz: number) => `1/${Math.round(1 / fArmaz)}`;
 
 export default function ApoioGas() {
   const [f, setF] = useState<Form>(PADRAO);
@@ -168,6 +172,266 @@ export default function ApoioGas() {
   const motivoDispensavelTD = r.td.zeradoPorDeadBand
     ? "a banda morta do termostato cobre todo o tempo alvo — o apoio nem chega a acionar"
     : "a reserva do boiler acima da temperatura de uso cobre a demanda no período";
+
+  // O memorial descreve os três métodos e a seleção que já estão calculados na tela.
+  useMemorial(MODULO, () => {
+    const obrigatorios: [string, number][] = [
+      ["VB — vazão de uso", f.vb],
+      ["TB — temperatura de uso", f.tb],
+      ["TAF — temperatura da água fria", f.taf],
+      ["TAQ — temperatura do boiler", f.taq],
+      ["V — consumo diário", f.vConsumoDiario],
+      ["FS — fator de simultaneidade", f.fs],
+      ["V — volume do boiler", f.volumeBoiler],
+      ["t — tempo alvo", f.tempoAlvo],
+      ["Histerese do termostato", f.histerese],
+    ];
+    const vazios = obrigatorios.filter(([, v]) => !Number.isFinite(v)).map(([label]) => label);
+
+    const metodos = [
+      {
+        rotulo: "Vazão Máxima Provável (V.M.P)",
+        potenciaUtil: r.vmp.potenciaUtil,
+        vazaoLmin: r.vmp.vazaoLmin,
+        sugestao: sugestoes.vmp,
+      },
+      {
+        rotulo: "NBR 16057 (Anexo C)",
+        potenciaUtil: r.nbr.potenciaUtil,
+        vazaoLmin: r.nbr.vazaoLmin,
+        sugestao: sugestoes.nbr,
+      },
+      {
+        rotulo: "Tempo Determinado (T.D)",
+        potenciaUtil: r.td.potenciaUtil,
+        vazaoLmin: r.td.vazaoLmin,
+        sugestao: sugestoes.td,
+      },
+    ];
+
+    // Uma linha por arranjo; a 1ª de cada método é a sugestão (realçada), as demais
+    // são as alternativas não dominadas que a tela lista abaixo dela.
+    const linhasSelecao: string[][] = [];
+    const realceSelecao: number[] = [];
+    for (const m of metodos) {
+      if (m.sugestao.status === "ok") {
+        m.sugestao.arranjos.forEach((a, i) => {
+          if (i === 0) realceSelecao.push(linhasSelecao.length);
+          linhasSelecao.push([
+            m.rotulo,
+            rotuloArranjo(a),
+            fmtKcal(a.potNominalTotal),
+            fmtKcal(a.potUtilTotal),
+            `${nf(0).format(a.folga)} kcal/h (${nf(1).format(a.folgaPct * 100)}%)`,
+            fmtBRL(a.precoTotal),
+          ]);
+        });
+      } else {
+        linhasSelecao.push([
+          m.rotulo,
+          m.sugestao.status === "apoio-dispensavel"
+            ? "apoio dispensável"
+            : "demanda acima do catálogo",
+          "—",
+          "—",
+          "—",
+          "—",
+        ]);
+      }
+    }
+
+    const ressalvasTD = [
+      "t₁ = V × Hist / (VB × (TB − TAF)) · P = 60 × [VB × (TB − TAF) − V × (TAQ − Hist − TB) / (t − t₁)], nunca negativo.",
+      r.td.potenciaUtil === 0 ? `Apoio dispensável neste método: ${motivoDispensavelTD}.` : "",
+      r.rearmeAbaixoUso
+        ? `Com histerese de ${nf(1).format(f.histerese)} °C o apoio só religa a ${nf(1).format(r.td.tempRearme)} °C, abaixo de TB (${nf(1).format(f.tb)} °C): a água chega abaixo da temperatura de uso antes de o apoio ligar. O cálculo segue fiel à planilha; avalie reduzir a histerese.`
+        : "",
+    ].filter(Boolean);
+
+    const conclusao = [
+      {
+        label: "Vazão do sistema — V.M.P",
+        valor: fmtLmin(r.vmp.vazaoLmin),
+        nota: `potência útil de ${fmtKcal(r.vmp.potenciaUtil)}`,
+      },
+      {
+        label: "Vazão do sistema — NBR 16057",
+        valor: fmtLmin(r.nbr.vazaoLmin),
+        nota: `potência útil de ${fmtKcal(r.nbr.potenciaUtil)}`,
+      },
+      {
+        label: "Vazão do sistema — Tempo Determinado",
+        valor: fmtLmin(r.td.vazaoLmin),
+        nota: `potência útil de ${fmtKcal(r.td.potenciaUtil)}`,
+      },
+      ...metodos.map((m) => ({
+        label: `Aquecedor sugerido — ${m.rotulo}`,
+        valor:
+          m.sugestao.status === "ok"
+            ? `${rotuloArranjo(m.sugestao.arranjos[0])} · ${fmtBRL(m.sugestao.arranjos[0].precoTotal)}`
+            : m.sugestao.status === "apoio-dispensavel"
+              ? "apoio dispensável"
+              : "demanda acima da capacidade do catálogo",
+        nota:
+          m.sugestao.status === "ok"
+            ? `pot. útil de ${fmtKcal(m.sugestao.arranjos[0].potUtilTotal)} para os ${fmtKcal(m.potenciaUtil)} exigidos`
+            : m.sugestao.status === "apoio-dispensavel"
+              ? "a demanda calculada é zero neste método"
+              : "revise as premissas do cálculo ou os preços do catálogo",
+        alerta: m.sugestao.status === "demanda-excede-cap",
+      })),
+    ];
+    if (r.tbAcimaBoiler) {
+      conclusao.push({
+        label: "TB acima de TAQ",
+        valor: `${nf(1).format(f.tb)} °C de uso contra ${nf(1).format(f.taq)} °C no boiler`,
+        nota: "a mistura sozinha não entrega a temperatura de uso; revise TAQ ou TB",
+        alerta: true,
+      });
+    }
+    if (modelosIgnorados.length > 0) {
+      conclusao.push({
+        label: "Modelos fora da seleção",
+        valor: modelosIgnorados.join(", "),
+        nota: "preço informado inválido (tem que ser maior que zero)",
+        alerta: true,
+      });
+    }
+
+    return {
+      cliente,
+      calculo: nome,
+      normas: [
+        "ABNT NBR 16057:2024 — Anexo C (volume de pico, fração armazenada da Tabela C.1 e volume de recuperação)",
+        "Balanço térmico da água (c ≈ 1 kcal/L·°C) — conversão de potência útil em vazão",
+        `Catálogo técnico Rinnai — vazão, potência nominal e rendimento dos aquecedores (preços de referência de ${DATA_REF_PRECOS})`,
+      ],
+      impedimento: vazios.length
+        ? `Preencha ${vazios.join(", ")} antes de gerar o memorial.`
+        : !r.tempValida
+          ? "Temperaturas incompatíveis: TAQ tem que ser maior que TAF e TB maior que TAF. Sem isso as conversões de potência em vazão dividem por zero."
+          : !(f.vb > 0)
+            ? "Informe a vazão de uso (VB) maior que zero — é ela que define a demanda nos três métodos."
+            : undefined,
+      blocos: [
+        {
+          tipo: "campos",
+          titulo: "Dados de entrada",
+          itens: [
+            { label: "VB — vazão de uso", valor: `${nf(2).format(f.vb)} l/min` },
+            { label: "TB — temperatura de uso", valor: `${nf(1).format(f.tb)} °C` },
+            { label: "TAF — temperatura da água fria", valor: `${nf(1).format(f.taf)} °C` },
+            { label: "TAQ — temperatura do boiler", valor: `${nf(1).format(f.taq)} °C` },
+            { label: "V — consumo diário (NBR 16057)", valor: `${nf(1).format(f.vConsumoDiario)} L` },
+            { label: "FS — fator de simultaneidade", valor: `${nf(2).format(f.fs)} (adimensional)` },
+            { label: "V — volume do boiler (T.D)", valor: `${nf(1).format(f.volumeBoiler)} L` },
+            { label: "t — tempo alvo (T.D)", valor: `${nf(1).format(f.tempoAlvo)} min` },
+            { label: "Histerese do termostato", valor: `${nf(1).format(f.histerese)} °C` },
+            {
+              label: "Preços do catálogo",
+              valor: precosEditados
+                ? "editados pelo projetista"
+                : `referência de ${DATA_REF_PRECOS}`,
+            },
+          ],
+        },
+        {
+          tipo: "texto",
+          titulo: "Método de cálculo",
+          paragrafos: [
+            `A demanda do apoio a gás é calculada por três métodos independentes e comparada. Em todos, a potência útil vira vazão pelo calor sensível da água (c ≈ 1 kcal/L·°C): Q = P / ΔT, com ΔT = TAQ − TAF = ${nf(1).format(r.deltaT)} °C.`,
+            "A Vazão Máxima Provável parte da vazão de uso corrigida para a temperatura do boiler (VAQ = VB × (TB − TAF) / (TAQ − TAF)) e pede a potência instantânea desse consumo (P = VAQ × ΔT × 60). O método da NBR 16057 (Anexo C) parte do consumo diário corrigido, aplica o fator de simultaneidade para obter o volume de pico, desconta a fração armazenada da Tabela C.1 e converte o volume de recuperação em potência (P = Vrecup × ΔT).",
+            "O Tempo Determinado dimensiona o apoio para recuperar o boiler dentro de um tempo alvo considerando a banda morta do termostato: o apoio só liga quando a água cai à temperatura de rearme (TAQ − histerese), o que consome t₁ minutos do tempo alvo. A seleção de aparelhos usa sempre o mesmo modelo em paralelo (sistemas gêmeos) e ordena os arranjos por preço, depois por número de aparelhos e por folga de potência.",
+          ],
+        },
+        {
+          tipo: "tabela",
+          titulo: "Vazões do sistema pelos três métodos",
+          colunas: ["Método", "Potência útil", "Vazão"],
+          linhas: metodos.map((m) => [m.rotulo, fmtKcal(m.potenciaUtil), fmtLmin(m.vazaoLmin)]),
+        },
+        {
+          tipo: "tabela",
+          titulo: "Memorial de cálculo — Vazão Máxima Provável (V.M.P)",
+          colunas: ["Parâmetro", "Valor"],
+          linhas: [
+            ["ΔT = TAQ − TAF", `${nf(1).format(r.deltaT)} °C`],
+            ["VAQ — vazão na temperatura do boiler", fmtLmin(r.vmp.vaq)],
+            ["P — potência útil", fmtKcal(r.vmp.potenciaUtil)],
+            ["Vazão do sistema", fmtLmin(r.vmp.vazaoLmin)],
+          ],
+          nota: "VAQ = VB × (TB − TAF) / (TAQ − TAF) · P = VAQ × ΔT × 60.",
+        },
+        {
+          tipo: "tabela",
+          titulo: "Memorial de cálculo — NBR 16057 (Anexo C)",
+          colunas: ["Parâmetro", "Valor"],
+          linhas: [
+            ["V corrigido para a temperatura do boiler", `${nf(1).format(r.nbr.vCorrigido)} L`],
+            ["V pico (× FS)", `${nf(1).format(r.nbr.vPico)} L`],
+            [
+              "F armaz — fração armazenada (Tabela C.1)",
+              Number.isFinite(r.nbr.fArmaz)
+                ? `${fracaoC1(r.nbr.fArmaz)} (${nf(4).format(r.nbr.fArmaz)})`
+                : "—",
+            ],
+            ["V armazenamento gás", `${nf(1).format(r.nbr.vArmazGas)} L`],
+            ["V recuperação", `${nf(1).format(r.nbr.vRecup)} L`],
+            ["P — potência útil", fmtKcal(r.nbr.potenciaUtil)],
+            ["Vazão do sistema", fmtLmin(r.nbr.vazaoLmin)],
+          ],
+          nota: "V corrigido = Vcons × (TB − TAF) / (TAQ − TAF) · V pico = V corrigido × FS · V recup = V pico × (1 − F armaz) · P = V recup × ΔT.",
+        },
+        {
+          tipo: "tabela",
+          titulo: "Tabela C.1 — fração armazenada por volume de pico (ABNT NBR 16057:2024, Anexo C)",
+          colunas: ["V pico (L)", "Fração armazenada"],
+          linhas: TABELA_C1.map((t) => [`${t.rotulo} L`, fracaoC1(t.fArmaz)]),
+          realce: linhaC1Ativa >= 0 ? [linhaC1Ativa] : [],
+          nota: "Realçada a faixa aplicada ao volume de pico deste dimensionamento.",
+        },
+        {
+          tipo: "tabela",
+          titulo: "Memorial de cálculo — Tempo Determinado (T.D)",
+          colunas: ["Parâmetro", "Valor"],
+          linhas: [
+            ["t₁ — atraso da banda morta", fmtMin(r.td.t1DeadBand)],
+            ["Temperatura de rearme (TAQ − Hist)", `${nf(1).format(r.td.tempRearme)} °C`],
+            ["P — potência útil", fmtKcal(r.td.potenciaUtil)],
+            ["Vazão do sistema", fmtLmin(r.td.vazaoLmin)],
+          ],
+          nota: ressalvasTD.join(" "),
+        },
+        {
+          tipo: "tabela",
+          titulo: "Seleção de aquecedores (custo × benefício)",
+          colunas: ["Método", "Arranjo", "Pot. nominal", "Pot. útil", "Folga", "Preço"],
+          linhas: linhasSelecao,
+          realce: realceSelecao,
+          nota: "Realçado o arranjo sugerido de cada método; as linhas seguintes são as alternativas não dominadas. Aparelhos do mesmo modelo em paralelo; a decisão final é do projetista.",
+        },
+        {
+          tipo: "tabela",
+          titulo: "Catálogo de aquecedores considerado",
+          colunas: ["Modelo", "Vazão", "Pot. nominal", "Rendimento", "Pot. útil", "Preço"],
+          linhas: CATALOGO_RINNAI.map((m) => [
+            m.modelo,
+            `${nf(1).format(m.vazaoLmin)} l/min`,
+            fmtKcal(m.potNominalKcalH),
+            nf(2).format(m.rendimento),
+            fmtKcal(potUtil(m)),
+            fmtBRL(precoEfetivo(m, precos)),
+          ]),
+          nota: `Preços médios de referência de ${DATA_REF_PRECOS}${precosEditados ? ", com os valores editados pelo projetista" : ""}; não incluem instalação, ponto de gás ou exaustão. Pot. útil = pot. nominal × rendimento (E35 com 0,85, dado do fabricante).`,
+        },
+        {
+          tipo: "resultado",
+          titulo: "Conclusão",
+          itens: conclusao,
+        },
+      ],
+    };
+  });
 
   return (
     <div className="space-y-5">
@@ -416,7 +680,7 @@ export default function ApoioGas() {
                     >
                       <td className="py-0.5">{t.rotulo} L</td>
                       <td className="py-0.5 text-right font-semibold">
-                        {t.fArmaz === 1 / 3 ? "1/3" : t.fArmaz === 1 / 4 ? "1/4" : t.fArmaz === 1 / 5 ? "1/5" : t.fArmaz === 1 / 6 ? "1/6" : "1/7"}
+                        {fracaoC1(t.fArmaz)}
                       </td>
                     </tr>
                   ))}
