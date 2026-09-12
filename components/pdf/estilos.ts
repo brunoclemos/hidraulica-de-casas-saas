@@ -123,8 +123,10 @@ export const s = StyleSheet.create({
   legendaAmostra: { width: 12, height: 3.5, borderRadius: 1.75, marginRight: 4 },
   legendaNome: { fontSize: 7.5, color: TINTA },
 
-  assinatura: { marginTop: 34, alignItems: "center" },
-  localData: { fontSize: 9, color: TINTA, marginBottom: 26 },
+  assinatura: { marginTop: 20, alignItems: "center" },
+  // espaço de punho entre a data e a linha: o suficiente para assinar à mão, sem o
+  // reservado generoso que empurrava a assinatura para uma página só dela
+  localData: { fontSize: 9, color: TINTA, marginBottom: 18 },
   linhaAssinatura: { width: 260, borderTopWidth: 0.8, borderTopColor: PRETO, marginBottom: 4 },
   responsavel: { fontFamily: "Helvetica-Bold", fontSize: 9.5, color: PRETO },
   responsavelCargo: { fontSize: 8, color: SUAVE, marginTop: 1.5 },

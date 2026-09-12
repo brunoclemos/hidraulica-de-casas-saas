@@ -20,6 +20,10 @@ const VAZIO = "—";
 // estranha) cai na marca da ferramenta em vez de derrubar o documento.
 const LOGO_SUPORTADA = /^data:image\/(png|jpe?g);base64,/i;
 
+// Teto de itens da conclusão colada à assinatura. O grupo é wrap={false}: passando da
+// altura da página, o react-pdf desiste de paginar e desenha tudo por cima.
+const ITENS_PARA_COLAR_ASSINATURA = 10;
+
 function MarcaFerramenta() {
   return (
     <View style={s.marca}>
@@ -148,6 +152,13 @@ function Rodape({ memorial }: { memorial: MemorialPronto }) {
 
 export function Memorial({ memorial, titulo }: { memorial: MemorialPronto; titulo: string }) {
   const autor = memorial.perfil.responsavel || memorial.perfil.empresa || "Hidráulica de Casas";
+  const ultimo = memorial.blocos.at(-1);
+  const conclusao =
+    ultimo?.tipo === "resultado" && ultimo.itens.length <= ITENS_PARA_COLAR_ASSINATURA
+      ? ultimo
+      : null;
+  const blocos = conclusao ? memorial.blocos.slice(0, -1) : memorial.blocos;
+  const assinatura = <Assinatura perfil={memorial.perfil} emitidoEm={memorial.emitidoEm} />;
   return (
     <Document
       title={titulo}
@@ -162,10 +173,20 @@ export function Memorial({ memorial, titulo }: { memorial: MemorialPronto; titul
         <Text style={s.titulo}>Memorial de Cálculo</Text>
         <Text style={s.subtitulo}>{memorial.moduloNome}</Text>
         <Identificacao memorial={memorial} />
-        {memorial.blocos.map((bloco, i) => (
+        {blocos.map((bloco, i) => (
           <Bloco key={i} bloco={bloco} />
         ))}
-        <Assinatura perfil={memorial.perfil} emitidoEm={memorial.emitidoEm} />
+        {conclusao ? (
+          // assinatura sozinha numa página lê como erro de geração: quando não cabe
+          // junto do último bloco, os dois viram um grupo que não quebra e a última
+          // página sai com conteúdo e assinatura
+          <View wrap={false}>
+            <Bloco bloco={conclusao} />
+            {assinatura}
+          </View>
+        ) : (
+          assinatura
+        )}
         <Rodape memorial={memorial} />
       </Page>
     </Document>
