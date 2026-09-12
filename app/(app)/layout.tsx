@@ -9,12 +9,14 @@ import { Marquee } from "@/components/Marquee";
 import { moduloLiberado } from "@/lib/modulos";
 import { iniciarHeartbeat, registrarEvento } from "@/lib/telemetria";
 import { sincronizarProjetos } from "@/lib/projetos";
+import { FolhaImpressao } from "@/components/FolhaImpressao";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [sessao, setSessao] = useState<Sessao | null>(null);
   const [pronto, setPronto] = useState(false);
+  const moduloAtual = pathname?.match(/^\/modulos\/([^/]+)/)?.[1] ?? null;
 
   useEffect(() => {
     const s = getSessao();
@@ -24,14 +26,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
     // guard: módulo bloqueado acessado por link direto -> volta ao dashboard.
     // Acesso interno (dono/dev/cliente) passa direto em qualquer módulo.
-    const m = pathname?.match(/^\/modulos\/([^/]+)/);
-    if (m && !moduloLiberado(m[1]) && !ehAcessoInterno(s.email)) {
+    if (moduloAtual && !moduloLiberado(moduloAtual) && !ehAcessoInterno(s.email)) {
       router.replace("/dashboard");
       return;
     }
     setSessao(s);
     setPronto(true);
-  }, [router, pathname]);
+  }, [router, pathname, moduloAtual]);
 
   // telemetria: heartbeat (tempo na plataforma) + sync inicial dos projetos
   useEffect(() => {
@@ -44,9 +45,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // telemetria: registra abertura de módulo
   useEffect(() => {
     const s = getSessao();
-    const m = pathname?.match(/^\/modulos\/([^/]+)/);
-    if (s && m && moduloLiberado(m[1])) registrarEvento(s.email, "modulo_aberto", m[1]);
-  }, [pathname]);
+    if (s && moduloAtual && moduloLiberado(moduloAtual)) {
+      registrarEvento(s.email, "modulo_aberto", moduloAtual);
+    }
+  }, [moduloAtual]);
 
   if (!pronto) {
     return (
@@ -58,12 +60,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen overflow-x-clip">
-      <header className="sticky top-0 z-40 border-b border-ink-700 bg-ink-900/80 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
+      <header className="sticky top-0 z-40 border-b border-ink-700 bg-ink-900/80 backdrop-blur print:hidden">
+        {/* abaixo de 360px o botão de PDF não cabe na linha: quebra em duas em vez
+            de empurrar o "Sair" pra fora da tela */}
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-2 px-4 py-3 max-[359px]:flex-wrap">
           <Link href="/dashboard">
             <Wordmark />
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {moduloAtual && (
+              <button
+                onClick={() => window.print()}
+                aria-label="Exportar este dimensionamento em PDF"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-600 px-2.5 py-1.5 text-xs font-medium text-zinc-400 transition hover:border-amber/50 hover:text-amber"
+              >
+                <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                  <path d="M6 7.5V3h8v4.5" strokeLinejoin="round" />
+                  <path d="M6 14.5H4.5A1.5 1.5 0 013 13V9a1.5 1.5 0 011.5-1.5h11A1.5 1.5 0 0117 9v4a1.5 1.5 0 01-1.5 1.5H14" strokeLinejoin="round" />
+                  <path d="M6 12h8v5H6z" strokeLinejoin="round" />
+                </svg>
+                <span className="hidden sm:inline">PDF</span>
+              </button>
+            )}
             <Link
               href="/clientes"
               className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:border-amber/50 hover:text-amber"
@@ -87,7 +105,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Marquee />
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 pb-28 pt-6">{children}</main>
+      <main className="mx-auto max-w-3xl px-4 pb-28 pt-6 print:pt-0">
+        {moduloAtual && sessao && <FolhaImpressao modulo={moduloAtual} email={sessao.email} />}
+        {children}
+      </main>
     </div>
   );
 }

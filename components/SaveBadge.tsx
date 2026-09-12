@@ -14,7 +14,7 @@ export function SaveBadge({
 }) {
   if (estado === "salvando") {
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-amber/10 px-3 py-1 text-xs font-medium text-amber">
+      <span className="inline-flex items-center gap-2 rounded-full bg-amber/10 px-3 py-1 text-xs font-medium text-amber print:hidden">
         <span className="h-2 w-2 animate-live-dot rounded-full bg-amber" />
         Salvando…
       </span>
@@ -22,14 +22,14 @@ export function SaveBadge({
   }
   if (estado === "salvo") {
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400">
+      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 print:hidden">
         <span className="h-2 w-2 rounded-full bg-emerald-400" />
         Salvo {quando ? quando : ""}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-zinc-100/5 px-3 py-1 text-xs font-medium text-zinc-400">
+    <span className="inline-flex items-center gap-2 rounded-full bg-zinc-100/5 px-3 py-1 text-xs font-medium text-zinc-400 print:hidden">
       <span className="h-2 w-2 animate-live-dot rounded-full bg-amber" />
       Alterações não salvas
     </span>

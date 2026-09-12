@@ -209,7 +209,7 @@ export function Accordion({
         <span className={dimmed ? "text-zinc-500" : "text-zinc-200"}>{title}</span>
         <span className="flex items-center gap-3">
           {extra}
-          <span className="text-amber transition-transform group-open:rotate-45">+</span>
+          <span className="text-amber transition-transform group-open:rotate-45 print:hidden">+</span>
         </span>
       </summary>
       <div className="space-y-4 px-4 pb-4">{children}</div>
