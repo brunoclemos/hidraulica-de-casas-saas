@@ -42,218 +42,31 @@ input[type="number"] {
 }
 
 /* ---------------------------------------------------------------------------
-   IMPRESSÃO — "Exportar PDF" é o print nativo do navegador (texto vetorial e
-   selecionável, gráficos SVG nítidos, zero KB de JS). Na tela o app é escuro e
-   cheio de controle; no papel é documento claro com os inputs e os resultados do
-   dimensionamento. Os seletores por [class*=] alcançam as classes do Tailwind
-   usadas nos 9 módulos sem precisar editar os page.tsx.
+   Cmd+P ACIDENTAL — exportar em PDF agora é o memorial de cálculo
+   (components/pdf/Memorial.tsx), gerado e baixado pelo botão do header. Este bloco
+   não constrói documento nenhum: só garante que quem apertar Cmd+P sem querer não
+   receba folhas quase em branco (o app é escuro e o Chrome não imprime fundo por
+   padrão) nem a barra de salvar por cima do conteúdo.
    --------------------------------------------------------------------------- */
 @media print {
   @page {
     size: A4 portrait;
-    margin: 12mm 10mm 16mm;
+    margin: 12mm 10mm;
   }
 
   html,
   body {
     background: #fff !important;
     background-image: none !important;
-    color: #18181b !important;
   }
 
-  /* Conteúdo de <details> fechado não sai no papel — e é ali que moram a tabela de
-     conexões e os detalhes técnicos. Forçar por CSS em vez de mexer no atributo
-     open: no modo controlado do Accordion quem manda no open é o React. */
-  details::details-content {
-    content-visibility: visible !important;
-    block-size: auto !important;
-  }
-  details:not([open]) > *:not(summary) {
-    display: block !important;
+  main * {
+    color: #27272a !important;
+    border-color: #d4d4d8 !important;
+    background-color: transparent !important;
   }
 
-  /* fora do papel: barra de salvar, navegação, "Meus projetos" e todo controle */
-  .fixed.bottom-0,
-  [data-print-ocultar],
-  main a,
-  button {
+  .fixed.bottom-0 {
     display: none !important;
-  }
-
-  /* exceção: cada inserção do projeto é um botão (toca pra editar) e o texto dele é
-     o resumo do trecho — sem isso a lista de inserções sairia só com 1, 2, 3 */
-  button[class*="flex-1 text-left"] {
-    display: block !important;
-  }
-
-  /* exceção: o switch de apoio (gás/resistência/bomba) é o que diz se aquele apoio
-     entrou na simulação — sem ele o papel não conta a mesma história que a tela */
-  button[role="switch"] {
-    display: inline-block !important;
-  }
-  button[role="switch"][aria-checked="true"] > span {
-    background-color: #faba0d !important;
-    border-color: #d89a00 !important;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-  input[type="checkbox"] {
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-
-  [data-print-cabecalho] {
-    display: block !important;
-    margin-bottom: 10px;
-  }
-
-  /* a faixa do rodapé é reservada no fluxo de TODAS as páginas: sem o
-     box-decoration-break: clone o padding só valeria no último fragmento e o
-     rodapé cobriria a última linha de cada página */
-  main {
-    padding-bottom: 9mm !important;
-    box-decoration-break: clone;
-    -webkit-box-decoration-break: clone;
-  }
-
-  /* rodapé repetido em todas as páginas. bottom negativo (pra cair na margem do
-     papel) não serve: o Chrome joga o que passa do fim da página pro topo da
-     seguinte. Fundo branco pra cobrir, e não misturar, se uma linha encostar. */
-  [data-print-rodape] {
-    display: flex !important;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    justify-content: space-between;
-    gap: 16px;
-    border-top: 1px solid #d4d4d8;
-    background: #fff;
-    padding: 3px 0 1px;
-  }
-
-  /* tema claro */
-  .glass {
-    background: #fff !important;
-    border-color: #d4d4d8 !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-  [class*="bg-ink-"],
-  [class*="bg-zinc-100/"] {
-    background-color: #fff !important;
-  }
-  [class*="bg-amber"] {
-    background-color: #fdf3d6 !important;
-  }
-  [class*="border-ink-"] {
-    border-color: #d4d4d8 !important;
-  }
-  [class*="border-amber"] {
-    border-color: #e3b84a !important;
-  }
-  [class*="text-zinc-"] {
-    color: #3f3f46 !important;
-  }
-  [class*="text-zinc-100"],
-  [class*="text-zinc-200"],
-  [class*="text-zinc-300"] {
-    color: #18181b !important;
-  }
-  [class*="text-zinc-500"],
-  [class*="text-zinc-600"],
-  [class*="text-zinc-700"],
-  .field-label {
-    color: #57534e !important;
-  }
-  [class*="text-amber"] {
-    color: #8a6000 !important;
-  }
-  [class*="text-emerald-"] {
-    color: #047857 !important;
-  }
-  [class*="text-red-"] {
-    color: #b91c1c !important;
-  }
-  [class*="text-yellow-"] {
-    color: #a16207 !important;
-  }
-  [class*="text-orange-"] {
-    color: #c2410c !important;
-  }
-  [class*="text-lime-"] {
-    color: #4d7c0f !important;
-  }
-
-  /* cor com significado (semáforo da pressão residual) sai mesmo sem o usuário
-     marcar "gráficos de fundo" no diálogo */
-  [class*="bg-emerald-"],
-  [class*="bg-red-"],
-  [class*="bg-yellow-"],
-  [class*="bg-orange-"],
-  [class*="bg-lime-"] {
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-
-  /* O Chrome não reavalia os breakpoints do Tailwind na largura do papel: sem isto
-     todo grid responsivo colapsa em 1 coluna e o documento dobra de páginas. */
-  [class*="lg:grid-cols-[400px"] {
-    display: grid !important;
-    grid-template-columns: 285px minmax(0, 1fr) !important;
-    gap: 14px !important;
-  }
-  [class*="sm:grid-cols-2"] {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-  [class*="sm:grid-cols-3"] {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  }
-  [class*="sm:grid-cols-4"] {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  }
-  [class*="sm:grid-cols-[minmax"] {
-    grid-template-columns: minmax(0, 0.8fr) 1fr 1fr !important;
-  }
-
-  /* full-bleed por negative margin é medida em vw: no papel jogaria metade do
-     conteúdo pra fora da folha */
-  [class*="mx-[calc(50%-50vw)]"] {
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-  }
-
-  [class*="sticky"] {
-    position: static !important;
-  }
-
-  /* caixas de rolagem (tabela minuto a minuto, tabelões de trecho) imprimem
-     inteiras em vez de cortadas na altura da janela */
-  [class*="overflow-auto"],
-  [class*="overflow-x-auto"],
-  [class*="overflow-y-auto"] {
-    overflow: visible !important;
-  }
-  [class*="max-h-"] {
-    max-height: none !important;
-  }
-  [class*="min-w-["] {
-    min-width: 0 !important;
-  }
-
-  /* no papel os campos não têm foco nem rolagem: valor grande em caixa estreita
-     saía cortado ("14500" virava "145") */
-  input,
-  select {
-    font-size: 11px !important;
-    padding: 4px 6px !important;
-  }
-
-  thead {
-    display: table-header-group;
-  }
-  tr,
-  svg {
-    break-inside: avoid;
   }
 }
