@@ -911,7 +911,13 @@ function dadosMemorial(
       titulo: "Método de cálculo",
       paragrafos: [
         "O boiler é tratado como um volume único e bem misturado. A simulação integra o balanço de energia sensível da água em passos de 1 minuto, partindo da temperatura inicial informada, e acompanha em paralelo os cenários sem apoio, com cada apoio isolado e com os apoios ativos somados.",
-        "Enquanto o boiler está acima da temperatura de mistura, a válvula termostática compensa a queda puxando proporcionalmente mais água quente, e o consumo é constante: N × Q × (TM − TF) ÷ volume. Abaixo da temperatura de mistura a válvula já está toda aberta e não tem o que compensar: a vazão consumida passa a ser a dos banhos e a queda vira proporcional a (T − TF), desacelerando rumo à temperatura da água fria. Em T = TM as duas expressões coincidem, então a emenda é contínua.",
+        // A saturação da válvula (commit 64de697) é o único ponto em que a
+        // simulação se afasta da planilha V3 do curso: estendida abaixo da T. de
+        // mistura, a queda linear da planilha levava o boiler a ficar mais frio
+        // que a água que entra nele (−25,8 °C com 5 banhos). O memorial é assinado
+        // por engenheiro e vai para o cliente da obra, então o método declara em
+        // que faixa vale cada formulação em vez de deixar a conta implícita.
+        "Acima da temperatura de mistura a válvula termostática compensa a queda puxando proporcionalmente mais água quente, e o consumo do boiler é constante em N × Q × (TM − TF) ÷ volume — é o comportamento da planilha do curso. Abaixo da temperatura de mistura a válvula satura: está toda aberta e não tem mais o que compensar, então o consumo deixa de ser constante e passa a (N × Q ÷ volume) × (T − TF), desacelerando rumo à temperatura da água fria. Em T = TM as duas formulações dão o mesmo valor, e a emenda entre elas é contínua.",
         "Cada apoio liga quando a temperatura cai a TQ menos a sua histerese e só desliga quando o boiler volta ao set point. O ganho de cada apoio ligado é a potência térmica dividida por 60 × volume: o gás entra com a potência multiplicada pelo rendimento (perda na chaminé), a resistência elétrica a 1 kW = 860 kcal/h sem rendimento (efeito Joule) e a bomba de calor pela saída térmica de 1 BTU/h = 0,252 kcal/h.",
       ],
     },
