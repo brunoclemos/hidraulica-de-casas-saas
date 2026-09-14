@@ -8,3 +8,6 @@ next-env.d.ts
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# cache local do wrangler
+.wrangler/
