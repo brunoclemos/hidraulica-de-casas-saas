@@ -602,6 +602,10 @@ export function calcularTrecho(t: Trecho, residualAnterior: number): ResultadoTr
 export interface TrechoSalvo extends Trecho {
   ambiente: string; // ex.: "Banheiro suíte" (hierarquia: projeto > ambiente > trechos)
   nome: string; // nome/identificação do trecho, ex.: "A-B"
+  // Trecho preenchido pelo importador de IFC (feedback 13/set). O motor IGNORA este
+  // campo; ele existe para a lista de inserções marcar "IFC" e listar o que foi
+  // decidido por heurística — sem ele a marcação sumiria no primeiro reload.
+  origemIfc?: { arquivo: string; heuristicas: string[] };
 }
 
 // Normaliza um trecho possivelmente vindo de um schema ANTIGO do localStorage
@@ -642,6 +646,13 @@ export function normalizarTrecho(raw: Partial<TrechoSalvo> | undefined | null): 
     // campo novo: projetos antigos guardavam tudo em `nome` -> herdamos como ambiente vazio.
     ambiente: typeof raw?.ambiente === "string" ? raw.ambiente : "",
     nome: typeof raw?.nome === "string" ? raw.nome : "",
+    // projeto salvo antes do importador não tem o campo -> undefined, resultado idêntico.
+    origemIfc:
+      typeof raw?.origemIfc?.arquivo === "string" &&
+      Array.isArray(raw.origemIfc.heuristicas) &&
+      raw.origemIfc.heuristicas.every((h) => typeof h === "string")
+        ? { arquivo: raw.origemIfc.arquivo, heuristicas: [...raw.origemIfc.heuristicas] }
+        : undefined,
   };
 }
 

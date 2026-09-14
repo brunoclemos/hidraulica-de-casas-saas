@@ -43,6 +43,7 @@ import {
   Projeto,
 } from "@/lib/projetos";
 import { ClienteField } from "@/components/ClienteField";
+import { ImportadorIfc } from "@/components/ifc/ImportadorIfc";
 import { useMemorial, BlocoMemorial } from "@/lib/memorial";
 
 const MODULO = "pvc-cpvc-pressao";
@@ -87,6 +88,8 @@ export default function PvcCpvcPressao() {
 
   // rascunho (inserção atual) e índice em edição (null = nova inserção)
   const [draft, setDraft] = useState<TrechoSalvo>(() => freshDraft("PVC", 0));
+  // como a inserção é montada: na mão (a tela de sempre) ou lendo um .ifc. Não persiste.
+  const [entrada, setEntrada] = useState<"manual" | "ifc">("manual");
   const [editIndex, setEditIndex] = useState<number | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
 
@@ -379,6 +382,13 @@ export default function PvcCpvcPressao() {
     setDraft((d) => freshDraft(d.material, f.trechos.length + 1, d));
     setEditIndex(null);
   }
+  // Trechos vindos do importador de IFC: entram no fim da lista, na ordem da cadeia, e
+  // daí em diante são inserções normais (editar, excluir, recalcular).
+  function inserirImportados(importados: TrechoSalvo[]) {
+    setF((p) => ({ ...p, trechos: [...p.trechos, ...importados] }));
+    setDraft((d) => freshDraft(d.material, f.trechos.length + importados.length, d));
+    setEditIndex(null);
+  }
   function salvarEdicao() {
     if (editIndex === null) return;
     setF((p) => ({
@@ -407,6 +417,9 @@ export default function PvcCpvcPressao() {
       else if (i < editIndex) setEditIndex(editIndex - 1);
     }
   }
+
+  const trechosDoIfc = f.trechos.filter((t) => t.origemIfc);
+  const arquivosIfc = Array.from(new Set(trechosDoIfc.map((t) => t.origemIfc?.arquivo ?? "")));
 
   // O memorial descreve as INSERÇÕES já confirmadas (o rascunho em montagem não entra)
   // e lê apenas o que o cálculo encadeado devolveu, trecho a trecho.
@@ -479,6 +492,15 @@ export default function PvcCpvcPressao() {
             valor: `${comoDigitado(f.residualInicial)} mca`,
           },
           { label: "Inserções (trechos)", valor: `${f.trechos.length}` },
+          ...(trechosDoIfc.length
+            ? [
+                {
+                  label: "Trechos importados do IFC",
+                  valor: `${trechosDoIfc.length}`,
+                  nota: arquivosIfc.join(" · "),
+                },
+              ]
+            : []),
           { label: "Materiais", valor: mistura || "—" },
           {
             label: "Vazão-base do tronco",
@@ -803,6 +825,24 @@ export default function PvcCpvcPressao() {
         <SaveBadge estado={estado} quando={salvoEm ? tempoRelativo(salvoEm) : undefined} />
       </div>
 
+      {/* COMO PREENCHER (feedback 13/set): manual, como sempre, ou lendo o IFC do projeto */}
+      <div className="grid grid-cols-2 gap-2">
+        {(["manual", "ifc"] as const).map((modo) => (
+          <button
+            key={modo}
+            onClick={() => setEntrada(modo)}
+            aria-pressed={entrada === modo}
+            className={`min-h-11 rounded-xl border py-3 text-sm font-semibold transition ${
+              entrada === modo
+                ? "border-amber bg-amber/10 text-amber"
+                : "border-ink-600 bg-ink-800 text-zinc-400"
+            }`}
+          >
+            {modo === "manual" ? "Preencher manualmente" : "Importar do IFC"}
+          </button>
+        ))}
+      </div>
+
       {/* TOGGLE AF (PVC) x AQ (CPVC) — vale só para a inserção em montagem/edição */}
       <div>
         <div className="grid grid-cols-2 gap-2">
@@ -828,6 +868,8 @@ export default function PvcCpvcPressao() {
         </p>
       </div>
 
+      {entrada === "ifc" && <ImportadorIfc onInserir={inserirImportados} />}
+
       {/* FORM do rascunho (inserção atual) */}
       <div ref={formRef} className="space-y-4 scroll-mt-24">
         <div className="flex items-center justify-between">
@@ -850,6 +892,19 @@ export default function PvcCpvcPressao() {
             hint="Pressão disponível na chegada (ex.: coluna do reservatório). Entra no 1º trecho."
           />
         </Accordion>
+
+        {editando && draft.origemIfc && (
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            Importado do IFC {draft.origemIfc.arquivo}.
+            {draft.origemIfc.heuristicas.length > 0 && (
+              <>
+                {" "}
+                <span className="text-amber">Confira:</span>{" "}
+                {draft.origemIfc.heuristicas.join("; ")}.
+              </>
+            )}
+          </p>
+        )}
 
         <Accordion title="Tubo & geometria" defaultOpen>
           <div className="grid grid-cols-2 gap-4">
@@ -1393,6 +1448,17 @@ export default function PvcCpvcPressao() {
                               {" "}· {p.trecho.material} {p.trecho.diametro}mm
                             </span>
                             {p.trecho.noTronco && <span className="ml-1 text-amber">· tronco</span>}
+                            {p.trecho.origemIfc && (
+                              <span className="ml-1 text-zinc-500">· IFC</span>
+                            )}
+                            {p.trecho.origemIfc && p.trecho.origemIfc.heuristicas.length > 0 && (
+                              <span
+                                className="ml-1 text-amber"
+                                title={p.trecho.origemIfc.heuristicas.join("; ")}
+                              >
+                                · conferir
+                              </span>
+                            )}
                             {i === editIndex && <span className="ml-1 text-amber">· editando</span>}
                           </div>
                           <div className="text-[11px] text-zinc-500">
